@@ -23,6 +23,7 @@ examples/*.png
 .ipynb_checkpoints/*
 pyLARDA/*.c
 pyLARDA/*.so
+.idea/*
 
 http_server/public/*
 http_server/*.log
