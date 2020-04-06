@@ -1,10 +1,10 @@
 long_description = "Python code for detecting peaks in cloud radar Doppler spectra in a supervised machine learning " \
                    "framework"
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
-    name='pyPEAKO',  # pip install pyPEAKO
+    name='pypeako',  # pip install pypeako
     version='0.0.1',
     description='peak detection in cloud radar Doppler spectra',
     long_description=long_description,
@@ -12,8 +12,9 @@ setup(
     author_email='teresa.vogl@uni-leipzig.de',
     url='https://github.com/ti-vo/pyPEAKO',
     license='MIT',
-    package_dir={'': 'peako'},
-    py_modules=["mark_peaks", "train_peako"],
+  #  package_dir={'': 'src'},
+    packages=find_packages(exclude=['doc']),
+ #   py_modules=['mark_peaks', 'peako'],
     package_data={},
     python_requires='>=3.6',
     install_requires=['numpy>=1.16', 'scipy>=1.2', 'netCDF4>=1.4.2',
