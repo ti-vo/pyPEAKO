@@ -3,12 +3,13 @@ import scipy
 import numpy as np
 import datetime
 import math
+import warnings
 import scipy.signal as si
 import os
 from scipy.optimize import differential_evolution
 import random
 import matplotlib
-matplotlib.use('TkAgg')
+#matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 
@@ -99,6 +100,64 @@ def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
     return np.asarray(width)
 
 
+def find_edges(spectrum, fill_value, peak_locations):
+    """
+    Find the indices of left and right edges of peaks in a spectrum
+
+    :param spectrum: a single spectrum in linear units
+    :param peak_locations: indices of peaks detected for this spectrum
+    :return: left_edges: list of indices of left edges,
+             right_edges: list of indices of right edges
+    """
+    left_edges = []
+    right_edges = []
+
+    for p_ind in range(len(peak_locations)):
+        # start with the left edge
+        p_l = peak_locations[p_ind]
+
+        # set first estimate of left edge to last bin before the peak
+        closest_below_noise_left = np.where(spectrum[0:p_l] == fill_value)
+        if len(closest_below_noise_left[0]) == 0:
+            closest_below_noise_left = 0
+        else:
+            # add 1 to get the first bin of the peak which is not fill_value
+            closest_below_noise_left = max(closest_below_noise_left[0]) + 1
+
+        if p_ind == 0:
+            # if this is the first peak, the left edge is the closest_below_noise_left
+            left_edge = closest_below_noise_left
+        elif peak_locations[p_ind - 1] > closest_below_noise_left:
+            # merged peaks
+            left_edge = np.argmin(spectrum[peak_locations[p_ind - 1] : p_l])
+            left_edge = left_edge + peak_locations[p_ind - 1]
+        else:
+            left_edge = closest_below_noise_left
+
+        # Repeat for right edge
+        closest_below_noise_right = np.where(spectrum[p_l:-1] == fill_value)
+        if len(closest_below_noise_right[0]) == 0:
+            # if spectrum does not go below noise (fill value), set it to the last bin
+            closest_below_noise_right = len(spectrum) - 1
+        else:
+            # subtract one to obtain the last index of the peak
+            closest_below_noise_right = min(closest_below_noise_right[0]) + p_l - 1
+
+        # if this is the last (rightmost) peak, this first guess is the right edge
+        if p_ind == (len(peak_locations) - 1):
+            right_edge = closest_below_noise_right
+
+        elif peak_locations[p_ind + 1] < closest_below_noise_right:
+            right_edge = np.argmin(spectrum[p_l:peak_locations[p_ind + 1]]) + p_l
+        else:
+            right_edge = closest_below_noise_right
+
+        left_edges.append(np.int(left_edge))
+        right_edges.append(np.int(right_edge))
+
+    return left_edges, right_edges
+
+
 def area_above_floor(left_edge, right_edge, spectrum, noise_floor, velbins):
     spectrum_above_noise = [max(x,0) for x in list(spectrum-noise_floor)]
     spectrum_above_noise = np.array(spectrum_above_noise)
@@ -158,15 +217,15 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
 
 
 class Peako(object):
-    def __init__(self, training_data, peak_detection='src', optimization_method='loop',
+    def __init__(self, training_data, peak_detection='peako', optimization_method='loop',
                  smoothing_method='loess', max_peaks=5, **kwargs):
 
         """
         initialize a Peako object
         :param training_data: list of strings (netcdf files to read in written by mark_peaks module,
         filenames starting with marked_peaks_...)
-        :param peak_detection: method for peak detection. Only option right now is 'src'; later 'peakTree' option
-        is to be added. Default is 'src'.
+        :param peak_detection: method for peak detection. Only option right now is 'peako'; later 'peakTree' option
+        is to be added. Default is 'peako'.
         :param optimization_method: Either 'loop' or 'scipy'. In case of 'loop' looping over different parameter
         combinations is performed in a brute-like way. Option 'scipy' uses differential evolution toolkit to find
         optimal solution. Default is 'loop'.
@@ -208,7 +267,10 @@ class Peako(object):
 
     def train_peako(self):
         """
-        Train the src algorithm.
+        Train the peak finding algorithm.
+        Depending on Peako.optimization_method, looping over possible parameter combinations or an optimization toolkit
+        is used to find the combination of time and height averaging, smoothing span, minimum peak width and minimum
+        peak prominence which yields the largest similarity between user-found and algorithm-detected peaks.
         """
         # locate the spectra that were marked by hand
         self.create_training_mask()
@@ -224,13 +286,52 @@ class Peako(object):
                                 # compute the similarity
                                 similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
-                                print(similarity, wth)
-        t, h, s, w, p = np.unravel_index(np.argmax(similarity_array, axis=None), similarity_array.shape)
-        return {'t_avg' : self.training_params['t_avg'][t],
-                'h_avg' : self.training_params['h_avg'][h],
-                'span'  : self.training_params['span'][s],
-                 'width': self.training_params['width'][w],
-                 'prom' : self.training_params['prom'][p]}
+                                # print(similarity, wth)
+            t, h, s, w, p = np.unravel_index(np.argmax(similarity_array, axis=None), similarity_array.shape)
+            return {'t_avg': self.training_params['t_avg'][t],
+                    'h_avg': self.training_params['h_avg'][h],
+                    'span': self.training_params['span'][s],
+                    'width': self.training_params['width'][w],
+                    'prom': self.training_params['prom'][p]}
+
+        elif self.optimization_method == 'scipy':
+            bounds = [(min(self.training_params['t_avg']), max(self.training_params['t_avg'])),
+                      (min(self.training_params['h_avg']), max(self.training_params['h_avg'])),
+                      (np.log10(min(self.training_params['span'])), np.log10(max(self.training_params['span']))),
+                      (min(self.training_params['width']), max(self.training_params['width'])),
+                      (min(self.training_params['prom']), max(self.training_params['prom']))]
+            result = differential_evolution(self.fun_to_minimize, bounds=bounds)
+            return result
+
+    def fun_to_minimize(self, parameters):
+        """
+        Function which is minimized by the optimization toolkit (differential evolution).
+        It averages the neighbor spectra in a range defined by t_avg and h_avg,
+        calls smooth_spectrum with the defined method (Peako.smoothing_method),
+        and calls get_peaks using the defined prominence and width. The t_avg, h_avg, span, width and prominence
+        parameters are passed as parameters:
+
+        :param parameters: list containing t_avg, h_avg, span, width and prominence. If this function is called within
+         scipy.differential_evolution, this corresponds to the order of the elements in "bounds"
+        :return: res: Result (negative similarity measure based on area below peaks); negative because optimization
+        toolkits usually search for the minimum.
+        """
+
+        # for differential evolution
+        # return negative similarity
+        t_avg, h_avg, span, width, prom = parameters
+        # trick to search for span in a larger (logarithmic) search space
+        span = 10 ** span
+        # trick to get integers:
+        t_avg = np.int(round(t_avg))
+        h_avg = np.int(round(h_avg))
+
+        peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, prom, width)
+        # compute the similarity
+        res = - self.area_peaks_similarity(peako_peaks, array_out=False)
+
+        print(",".join(map(str, np.append(parameters, res))))
+        return res
 
     def average_smooth_detect(self, t_avg, h_avg, span, prom, width):
         """
@@ -267,10 +368,14 @@ class Peako(object):
                 var_string = f'C{c+1}Zspec'
 
                 for ind in range(len(h_ind)):
-                    avg_specs[var_string][h_ind[ind], t_ind[ind], :] = np.nanmean(self.spec_data[f][var_string].values[
-                                                                       (h_ind[ind] - h_avg): (h_ind[ind] + h_avg + 1),
-                                                                       (t_ind[ind] - t_avg): (t_ind[ind] + t_avg + 1),
-                                                                       :], axis=(0, 1))
+                    # This will throw a RuntimeWarning : Mean of empty slice which can be annoying, so we're ignoring
+                    # warnings here.
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        avg_specs[var_string][h_ind[ind], t_ind[ind], :] = np.nanmean(
+                            self.spec_data[f][var_string].values[(h_ind[ind] - h_avg): (h_ind[ind] + h_avg + 1),
+                                                                 (t_ind[ind] - t_avg): (t_ind[ind] + t_avg + 1),
+                                                                 :], axis=(0, 1))
             avg_specs_list.append(avg_specs)
 
         return avg_specs_list
@@ -306,7 +411,7 @@ class Peako(object):
                     # it is important that nan values are not included in the spectrum passed to si
                     locs, props = si.find_peaks(spectrum, prominence=prom)
                     # find left and right edges of peaks
-                    le, re = self.find_edges(spectra[f][f'C{c+1}Zspec'].values[h, t, :], locs)
+                    le, re = find_edges(spectra[f][f'C{c+1}Zspec'].values[h, t, :], self.fill_value, locs)
                     # compute the width
                     width = peak_width(spectra[f][f'C{c+1}Zspec'].values[h, t, :], locs, le, re)
                     locs = locs[width > width_thresh]
@@ -317,63 +422,6 @@ class Peako(object):
 
         return peaks
 
-    def find_edges(self, spectrum, peak_locations):
-        """
-        Find the indices of left and right edges of peaks in a spectrum
-
-        :param spectrum: a single spectrum in linear units
-        :param peak_locations: indices of peaks detected for this spectrum
-        :return: left_edges: list of indices of left edges,
-                 right_edges: list of indices of right edges
-        """
-        left_edges = []
-        right_edges = []
-        fill_value = self.fill_value
-
-        for p_ind in range(len(peak_locations)):
-            # start with the left edge
-            p_l = peak_locations[p_ind]
-
-            # set first estimate of left edge to last bin before the peak
-            closest_below_noise_left = np.where(spectrum[0:p_l] == fill_value)
-            if len(closest_below_noise_left[0]) == 0:
-                closest_below_noise_left = 0
-            else:
-                # add 1 to get the first bin of the peak which is not fill_value
-                closest_below_noise_left = max(closest_below_noise_left[0]) + 1
-
-            if p_ind == 0:
-                # if this is the first peak, the left edge is the closest_below_noise_left
-                left_edge = closest_below_noise_left
-            elif peak_locations[p_ind - 1] > closest_below_noise_left:
-                # merged peaks
-                left_edge = np.argmin(spectrum[peak_locations[p_ind - 1] : p_l])
-                left_edge = left_edge + peak_locations[p_ind - 1]
-            else:
-                left_edge = closest_below_noise_left
-
-            # Repeat for right edge
-            closest_below_noise_right = np.where(spectrum[p_l:-1] == fill_value)
-            if len(closest_below_noise_right[0]) == 0:
-                # if spectrum does not go below noise (fill value), set it to the last bin
-                closest_below_noise_right = len(spectrum) - 1
-            else:
-                # subtract one to obtain the last index of the peak
-                closest_below_noise_right = min(closest_below_noise_right[0]) + p_l - 1
-
-            # if this is the last (rightmost) peak, this first guess is the right edge
-            if p_ind == (len(peak_locations) - 1):
-                right_edge = closest_below_noise_right
-
-            elif peak_locations[p_ind + 1] < closest_below_noise_right:
-                right_edge = np.argmin(spectrum[p_l:peak_locations[p_ind + 1]]) + p_l
-            else:
-                right_edge = closest_below_noise_right
-
-            left_edges.append(np.int(left_edge))
-            right_edges.append(np.int(right_edge))
-
-        return left_edges, right_edges
 
     def find_peaks_peako(self, t_avg, h_avg, span, prom, wth):
         # call average_smooth_detect
@@ -413,16 +461,11 @@ class Peako(object):
                         mode='nearest')
         return spectra_out
 
-    def fun_to_minimize(self):
-        # for differential evolution
-        # return negative similarity
-        pass
-
     def area_peaks_similarity(self, algorithm_peaks, array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
             peaks in a radar Doppler spectrum
 
-            :param algorithm_peaks: ndarray of indices of spectrum where src detected peaks
+            :param algorithm_peaks: ndarray of indices of spectrum where peako detected peaks
             :param array_out: Bool. If True, area_peaks_similarity will return a list of xr.Datasets containing the
             computed similarities for each spectrum in the time-height grid. If False, the integrated similarity (sum)
             of all the hand-marked spectra is returned. Default is False.
@@ -446,8 +489,8 @@ class Peako(object):
                     peako_peaks = algorithm_peaks[f][f'C{c+1}PeakoPeaks'].values[h, t, :]
                     peako_peaks = peako_peaks[peako_peaks > 0]
                     peako_peaks.sort()
-                    le_user_peaks, re_user_peaks = self.find_edges(spectrum, user_peaks)
-                    le_alg_peaks, re_alg_peaks = self.find_edges(spectrum, peako_peaks)
+                    le_user_peaks, re_user_peaks = find_edges(spectrum, self.fill_value, user_peaks)
+                    le_alg_peaks, re_alg_peaks = find_edges(spectrum, self.fill_value, peako_peaks)
                     similarity = 0
                     overlap_area = math.inf
                     while(len(peako_peaks) > 0) & (len(user_peaks) > 0) & (overlap_area > 0):
@@ -468,10 +511,10 @@ class Peako(object):
                     # Subtract area of non-overlapping regions
                     for i in range(len(le_alg_peaks)):
                         similarity = similarity - area_above_floor(le_alg_peaks[i], re_alg_peaks[i], spectrum,
-                                                                        np.nanmin(spectrum), velbins)
+                                                                   np.nanmin(spectrum), velbins)
                     for i in range(len(le_user_peaks)):
                         similarity = similarity - area_above_floor(le_user_peaks[i], re_user_peaks[i], spectrum,
-                                                                        np.nanmin(spectrum), velbins)
+                                                                   np.nanmin(spectrum), velbins)
                     #print(user_peaks, algorithm_peaks, similarity)
 
                     if not array_out:
@@ -580,7 +623,7 @@ class TrainingData(object):
         :return peakPowers: The y values (in units of dBZ) of the marked peaks
         """
 
-        matplotlib.use('TkAgg')
+        #matplotlib.use('TkAgg')
         peakVals = []
         peakPowers = []
         n_rg = self.chirps_to_ranges(n_file)
@@ -689,39 +732,4 @@ class TrainingData(object):
                     dataset.__getitem__(key).values[mask] = datalist[r][mask]
                     dataset.to_netcdf(self.peaks_ncfiles[i])
                     print(f'updated file {self.peaks_ncfiles[i]}')
-
-if __name__ == '__main__':
-
-    # for testing peak marking:
-    dummy = TrainingData(['/home/tvogl/PhD/radar_data/W_band_Punta/cloudnet_format/20190222-1916-1925_LIMRAD94_spectra.nc',
-                          '/home/tvogl/PhD/radar_data/W_band_Punta/cloudnet_format/20190222-1616-1625_LIMRAD94_spectra.nc'],
-                         num_spec=[5, 5])
-    dummy.mark_random_spectra()
-    dummy.save_training_data()
-
-
-# for testing training:
-    P = Peako(['/home/tvogl/PhD/radar_data/W_band_Punta/cloudnet_format/marked_peaks_20190222-1916-1925_LIMRAD94_spectra.nc'])
-    P.create_training_mask()
-    a = P.average_spectra(0, 1)
-    b = P.smooth_spectra(a, 0.05)
-    import matplotlib
-    matplotlib.use('TkAgg')
-
-    import matplotlib.pyplot as plt
-    hind, tind = np.where(P.marked_peaks_index[0][0] == 1)
-    fig, ax = plt.subplots(1)
-    ax.plot(P.spec_data[0].C1velocity.values, lin2z(P.spec_data[0].C1Zspec[hind[1], tind[1]]), label='raw')
-    ax.plot(a[0].C1velocity.values, lin2z(a[0].C1Zspec[hind[1], tind[1]]), label='averaged')
-    ax.plot(b[0].C1velocity.values, lin2z(b[0].C1Zspec[hind[1], tind[1]]), label='averaged, smoothed')
-    ax.legend()
-    test = P.train_peako()
-
-    a2 = P.average_spectra(test['h_avg'], test['h_avg'])
-    b2 = P.smooth_spectra(a2, test['span'])
-    fig, ax = plt.subplots(1)
-    ax.plot(P.spec_data[0].C1velocity.values, lin2z(P.spec_data[0].C1Zspec[hind[1], tind[1]]), label = 'raw')
-    ax.plot(a2[0].C1velocity.values, lin2z(a2[0].C1Zspec[hind[1], tind[1]]), label='averaged')
-    ax.plot(b2[0].C1velocity.values, lin2z(b2[0].C1Zspec[hind[1], tind[1]]), label='averaged, smoothed')
-    ax.legend()
 
