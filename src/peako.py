@@ -9,7 +9,6 @@ import os
 from scipy.optimize import differential_evolution
 import random
 import matplotlib
-#matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 
@@ -34,7 +33,7 @@ def argnearest(array, value):
 
     :param array: sorted numpy array with values, list will be converted to 1D array
     :param value: value to find
-    :returns
+    :return:
         index
     """
     if type(array) == list:
@@ -58,6 +57,7 @@ def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
     :param right_edge: 1-D ndarray, indices of the right edges of each peak (output of functions_optimize.find_edges)
     :param rel_height: float, at which relative height compared to the peak height the width should be computed
     :return: width: array containing the width in # of Doppler bins
+
     """
     # initialize empty lists
     # left and right edge, position (ps) is used
@@ -216,6 +216,22 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
     return area
 
 
+def vel_to_ind(velocities, velbins, fill_value):
+    """
+
+    :param velocities: list of Doppler velocities
+    :param velbins: Doppler velocity bins
+    :param fill_value: value to be ignored in velocities list
+    :return:
+    indices of closest match for each element of velocities in velbins
+    """
+
+    indices = np.asarray([argnearest(velbins, v) for v in velocities])
+    indices[velocities == fill_value] = fill_value
+
+    return indices
+
+
 class Peako(object):
     def __init__(self, training_data, peak_detection='peako', optimization_method='loop',
                  smoothing_method='loess', max_peaks=5, **kwargs):
@@ -249,6 +265,7 @@ class Peako(object):
         self.training_params = kwargs['training_params'] if 'training params' in kwargs else \
             {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.005, 0.02, 0.005),
              'width': np.arange(0, 1.5, 0.5), 'prom': range(2)}
+        self.training_result = {'loop': np.empty((1, 6)), 'scipy': np.empty((1, 6))}
 
     def create_training_mask(self):
         """
@@ -271,10 +288,11 @@ class Peako(object):
         Depending on Peako.optimization_method, looping over possible parameter combinations or an optimization toolkit
         is used to find the combination of time and height averaging, smoothing span, minimum peak width and minimum
         peak prominence which yields the largest similarity between user-found and algorithm-detected peaks.
+
         """
         # locate the spectra that were marked by hand
         self.create_training_mask()
-        # if optimization method is set to "loop", loop over possible parameter combinations
+        # if optimization method is set to "loop", loop over possible parameter combinations:
         if self.optimization_method == 'loop':
             similarity_array = np.full([len(self.training_params[key]) for key in self.training_params.keys()], np.nan)
             for i, t_avg in enumerate(self.training_params['t_avg']):
@@ -286,7 +304,15 @@ class Peako(object):
                                 # compute the similarity
                                 similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
+                                self.training_result['loop'] = np.append(self.training_result['loop'],
+                                                                         [[t_avg, h_avg, span, wth, prom, similarity]],
+                                                                         axis=0)
                                 # print(similarity, wth)
+
+            # remove the first line from the training result
+            self.training_result['loop'] = np.delete(self.training_result['loop'], 0, axis=0)
+
+            # extract the parameter combination yielding the maximum in similarity
             t, h, s, w, p = np.unravel_index(np.argmax(similarity_array, axis=None), similarity_array.shape)
             return {'t_avg': self.training_params['t_avg'][t],
                     'h_avg': self.training_params['h_avg'][h],
@@ -301,6 +327,9 @@ class Peako(object):
                       (min(self.training_params['width']), max(self.training_params['width'])),
                       (min(self.training_params['prom']), max(self.training_params['prom']))]
             result = differential_evolution(self.fun_to_minimize, bounds=bounds)
+
+            # remove the first line from the training result
+            self.training_result['scipy'] = np.delete(self.training_result['scipy'], 0, axis=0)
             return result
 
     def fun_to_minimize(self, parameters):
@@ -312,13 +341,12 @@ class Peako(object):
         parameters are passed as parameters:
 
         :param parameters: list containing t_avg, h_avg, span, width and prominence. If this function is called within
-         scipy.differential_evolution, this corresponds to the order of the elements in "bounds"
+        scipy.differential_evolution, this corresponds to the order of the elements in "bounds"
         :return: res: Result (negative similarity measure based on area below peaks); negative because optimization
         toolkits usually search for the minimum.
+
         """
 
-        # for differential evolution
-        # return negative similarity
         t_avg, h_avg, span, width, prom = parameters
         # trick to search for span in a larger (logarithmic) search space
         span = 10 ** span
@@ -328,20 +356,26 @@ class Peako(object):
 
         peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, prom, width)
         # compute the similarity
-        res = - self.area_peaks_similarity(peako_peaks, array_out=False)
+        res = self.area_peaks_similarity(peako_peaks, array_out=False)
 
-        print(",".join(map(str, np.append(parameters, res))))
-        return res
+        # print(",".join(map(str, np.append(parameters, res))))
+        self.training_result['scipy'] = np.append(self.training_result['scipy'],
+                                                  [[t_avg, h_avg, span, width, prom, res]], axis=0)
 
-    def average_smooth_detect(self, t_avg, h_avg, span, prom, width):
+        # for differential evolution
+        # return negative similarity
+        return -res
+
+    def average_smooth_detect(self, t_avg, h_avg, span, width, prom):
         """
         Average, smooth spectra and detect peaks that fulfill prominence and with criteria
 
         :param t_avg: numbers of neighbors in time dimension to average over (on each side)
         :param h_avg: numbers of neighbors in range dimension to average over (on each side)
         :param span: Percentage of number of data points used for smoothing when loess or lowess smoothing is used
-        :param prom: minimum peak prominence in dBZ
         :param width: minimum peak width in m/s Doppler velocity (width at half-height)
+        :param prom: minimum peak prominence in dBZ
+
         :return:
         """
         avg_spec = self.average_spectra(t_avg, h_avg)
@@ -356,7 +390,8 @@ class Peako(object):
         :param t_avg: number of neighboring spectra each side in time dimension to average over
         :param h_avg: number of neighboring spectra each side in range dimension to average over
         :return: avg_spec_list (list of xarray DataArrays having the same dimensions as DataArrays in Peako.spec_data,
-        containing averaged spectra)
+                 containing averaged spectra)
+
         """
         avg_specs_list = []  # initialize empty list
         for f in range(len(self.spec_data)):
@@ -421,7 +456,6 @@ class Peako(object):
             peaks.append(peaks_dataset)
 
         return peaks
-
 
     def find_peaks_peako(self, t_avg, h_avg, span, prom, wth):
         # call average_smooth_detect
@@ -520,6 +554,162 @@ class Peako(object):
                     if not array_out:
                         sim_out += similarity
         return sim_out
+
+    def assert_training(self):
+        """
+        assertion that training has happened. Checks if there is a training mask in Peako.marked_peaks_index and that
+        there is a training result stored in Peako.training_result.
+        """
+
+        # assert that training has happened
+        # check if there is a training mask and if there is a result
+        assert(len(self.marked_peaks_index) > 0), "no training mask available"
+        assert(self.training_result['loop'].shape[0] + self.training_result['scipy'].shape[0] > 2), "no training result"
+
+    def training_stats(self, make_3d_plots=False):
+        """
+        print out training statistics
+        :param make_3d_plots: bool: Default is False. If set to True, plot_3d_plots will be called
+        """
+
+        self.assert_training()
+        # compute maximum possible similarity
+        user_peaks = []
+        for f in range(len(self.specfiles)):
+            peaks_dataset = xr.Dataset()
+            for c in range(len(self.training_data[f].chirp)):
+                velbins = self.spec_data[f][f'C{c+1}vel'].values
+                peaks_array = xr.Dataset(data_vars={f'C{c+1}PeakoPeaks': xr.DataArray(np.full(
+                    self.training_data[f][f'C{c+1}peaks'].values.shape,
+                    np.nan, dtype=np.int), dims=[f'C{c+1}range', 'time', 'peaks'])})
+                # convert m/s to indices (call vel_to_ind)
+                h_ind, t_ind = np.where(self.marked_peaks_index[f][c] == 1)
+                for h, t in zip(h_ind, t_ind):
+                    indices = vel_to_ind(self.training_data[f][f'C{c + 1}peaks'].values[h, t, :], velbins,
+                                         self.fill_value)
+                    peaks_array[f'C{c+1}PeakoPeaks'].values[h, t, :] = indices
+                peaks_dataset.update(other=peaks_array)
+            user_peaks.append(peaks_dataset)
+
+        maximum_similarity = self.area_peaks_similarity(user_peaks)
+        for j in self.training_result.keys():
+            if self.training_result[j].shape[0] > 1:
+                print(f'{j}:')
+                catch = np.nanmax(self.training_result[j][:, -1])
+                print(f'similarity is {round(catch/maximum_similarity*100,2)}% of maximum possible similarity')
+                print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, width: {0[3]}, prom: {0[4]}'.format(
+                    (self.training_result[j][np.argmax(self.training_result[j][:, -1]), :-1])))
+
+                if make_3d_plots:
+                    fig, ax = self.plot_3d_plots(j)
+        return maximum_similarity
+
+    def plot_3d_plots(self, key):
+        """
+        Generates 4 panels of 3D plots of parameter vs. parameter vs. similarity for evaluating the training of pyPEAKO
+        by eye
+
+        :param key: dictionary key in Peako.training_result for which to make the 3D plots, either 'loop' or 'scipy'.
+        :return: fig, ax : matplotlib.pyplot figure and axes
+        """
+
+        from mpl_toolkits.mplot3d import Axes3D
+
+        training_result = self.training_result[key]
+        fig, ax = plt.subplots(2, 2, subplot_kw=dict(projection='3d'))
+        ax[0, 0].scatter(training_result[:,0], training_result[:,1], training_result[:,-1], zdir='z',
+                         c=training_result[:, -1],
+                   cmap='seismic', vmin=-np.nanmax(training_result[:, -1]), vmax=np.nanmax(training_result[:, -1]))
+        ax[0, 0].set_xlabel('height averages')
+        ax[0, 0].set_ylabel('time averages')
+        ax[0, 0].set_zlabel('similarity')
+
+        ax[1, 1].scatter(training_result[:,3], training_result[:,2], training_result[:,-1], zdir='z',
+                         c=training_result[:, -1],
+                   cmap='seismic', vmin=-np.nanmax(training_result[:, -1]), vmax=np.nanmax(training_result[:, -1]))
+        ax[1, 1].set_xlabel('width')
+        ax[1, 1].set_ylabel('span')
+        ax[1, 1].set_zlabel('similarity')
+
+        ax[0, 1].scatter(training_result[:,4], training_result[:,3], training_result[:,-1], zdir='z',
+                         c=training_result[:, -1],
+                   cmap='seismic', vmin=-np.nanmax(training_result[:, -1]), vmax=np.nanmax(training_result[:, -1]))
+        ax[0, 1].set_xlabel('prom')
+        ax[0, 1].set_ylabel('width')
+        ax[0, 1].set_zlabel('similarity')
+
+        ax[1, 0].scatter(training_result[:, 4], training_result[:, 1], training_result[:, -1], zdir='z',
+                         c=training_result[:, -1],
+                   cmap='seismic', vmin=-np.nanmax(training_result[:, -1]), vmax=np.nanmax(training_result[:, -1]))
+        ax[1, 0].set_xlabel('prom')
+        ax[1, 0].set_ylabel('time averages')
+        ax[1, 0].set_zlabel('similarity')
+
+        return fig, ax
+
+    def plot_user_algorithm_spectrum(self, **kwargs):
+
+        # assert that training has happened:
+        self.assert_training()
+
+        # set random seed if it's given in the key word arguments:
+        if 'seed' in kwargs:
+            random.seed(kwargs['seed'])
+
+        # select a random user-marked spectrum
+        f = random.randint(0, len(self.marked_peaks_index) - 1)
+        c = random.randint(0, len(self.marked_peaks_index[f]) - 1)
+        h_ind, t_ind = np.where(self.marked_peaks_index[f][c] == 1)
+        i = random.randint(0, len(h_ind) - 1)
+        velbins = self.spec_data[f][f'C{c+1}vel'].values
+        spectrum = self.spec_data[f][f'C{c+1}Zspec'].values[h_ind[i], t_ind[i], :]
+        user_ind = vel_to_ind(self.training_data[f][f'C{c+1}peaks'].values[h_ind[i], t_ind[i], :], velbins=velbins,
+                              fill_value=self.fill_value)
+        user_ind = user_ind[user_ind > 0]
+
+
+        # TODO move part below into a separate function and store DataArray in the Peako object
+        peako_peaks = {}
+        for j in self.training_result.keys():
+            if self.training_result[j].shape[0] > 1:
+                i_max = np.argmax(self.training_result[j][:, -1])
+                h, t, s, w, p = self.training_result[j][i_max, :-1]
+                peako_peaks[j] = self.average_smooth_detect(t_avg=int(t), h_avg=int(h), span=s, width=w, prom=p)
+
+       # plotting
+        fsz = 13
+        star = matplotlib.path.Path.unit_regular_star(6)
+        circle = matplotlib.path.Path.unit_circle()
+        # concatenate the circle with an internal cutout of the star
+        verts = np.concatenate([circle.vertices, star.vertices[::-1, ...]])
+        codes = np.concatenate([circle.codes, star.codes])
+        cut_star = matplotlib.path.Path(verts, codes)
+
+        fig, ax = plt.subplots(1)
+        ax.plot(velbins, lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
+
+        c_ind = 0
+        for j in peako_peaks.keys():
+            peako_ind = peako_peaks[j][f][f'C{c + 1}PeakoPeaks'].values[h_ind[i], t_ind[i], :]
+            peako_ind = peako_ind[peako_ind > 0]
+
+            ax.plot(velbins[peako_ind], lin2z(spectrum)[peako_ind], marker='o',
+                    color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
+                linestyle="None", label=f'PEAKO peaks {j}', markersize=8)
+            c_ind += 1
+
+        ax.plot(velbins[user_ind], lin2z(spectrum)[user_ind], marker=cut_star, color='r',
+                linestyle="None", label='user peaks')
+        ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
+        ax.set_ylabel('Reflectivity [dBZ m$\\mathregular{^{-1}}$ s]', fontweight='semibold', fontsize=fsz)
+        ax.grid(linestyle=':')
+        ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
+        ax.legend(fontsize=fsz)
+        plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+        ax.set_title(f'spectrum at {round(self.spec_data[f][f"C{c+1}range"].values[h_ind[i]])} m, '
+                     f'{format_hms(self.spec_data[f]["time"].values[int(t_ind[i])])}')
+
+        return fig, ax
 
 
 class TrainingData(object):

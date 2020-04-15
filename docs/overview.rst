@@ -21,4 +21,4 @@ to be adjusted to work with the most current spectra file format.
 The cloudnet community will hopefully share their routines for bringing spectra files from different cloud radars into
 the desired format. Ongoing discussion is happening in the `Cloudnet forum`_.
 
-.. _Cloudnet forum: https://forum.cloudnet.fmi.fi/)
+.. _Cloudnet forum: https://forum.cloudnet.fmi.fi/

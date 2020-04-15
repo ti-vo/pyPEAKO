@@ -10,9 +10,10 @@ This is the documentation for pyPEAKO, a Python code project for detection of pe
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-    overview
-    installation
-    guide
+
+   overview
+   installation
+   guide
 
 
 

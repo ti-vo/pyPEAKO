@@ -1,8 +1,9 @@
 
-with open("README.md") as readme:
-    long_description = readme.read()
 
 from setuptools import setup, find_packages
+
+with open("README.md") as readme:
+    long_description = readme.read()
 
 setup(
     name='pyPEAKO',  # pip install pypeako
