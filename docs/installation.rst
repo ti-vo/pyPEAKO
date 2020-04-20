@@ -16,8 +16,9 @@ In the meantime, installation has to be done manually via cloning from GitHub:
 
    $ git clone https://github.com/ti-vo/pyPEAKO
 
-Then navigate to the main folder (pyPEAKO):
+Then navigate to the main folder (pyPEAKO) and install the package in your current environment:
 
 .. code-block:: console
 
-   $ python3 setup.py install --user
+   $ cd pyPEAKO
+   $ pip install -e .

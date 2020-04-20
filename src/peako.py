@@ -5,12 +5,14 @@ import datetime
 import math
 import warnings
 import scipy.signal as si
+import copy
 import os
 from scipy.optimize import differential_evolution
 import random
 import matplotlib
 import matplotlib.pyplot as plt
 
+# TODO specify directory for plots and write some pdfs out with nice naming
 
 def lin2z(array):
     """convert linear values to dB (for np.array or single number)"""
@@ -262,10 +264,16 @@ class Peako(object):
         self.marked_peaks_index = []
         self.max_peaks = max_peaks
         self.fill_value = self.spec_data[0]._FillValue
-        self.training_params = kwargs['training_params'] if 'training params' in kwargs else \
+        self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
             {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.005, 0.02, 0.005),
-             'width': np.arange(0, 1.5, 0.5), 'prom': range(2)}
+             'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
         self.training_result = {'loop': np.empty((1, 6)), 'scipy': np.empty((1, 6))}
+        self.peako_peaks_training = {'loop': [], 'scipy': []}
+        self.peako_peaks_testing = {'loop': [], 'scipy': []}
+        self.testing_files = []
+        self.testing_data = []
+        self.specfiles_test = []
+        self.spec_data_test = []
 
     def create_training_mask(self):
         """
@@ -300,14 +308,15 @@ class Peako(object):
                     for k, span in enumerate(self.training_params['span']):
                         for l, wth in enumerate(self.training_params['width']):
                             for m, prom in enumerate(self.training_params['prom']):
-                                peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, prom, wth)
+                                peako_peaks = self.average_smooth_detect(t_avg=t_avg, h_avg=h_avg, span=span, width=wth,
+                                                                         prom=prom)
                                 # compute the similarity
                                 similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
                                 self.training_result['loop'] = np.append(self.training_result['loop'],
                                                                          [[t_avg, h_avg, span, wth, prom, similarity]],
                                                                          axis=0)
-                                # print(similarity, wth)
+                                print(similarity, t_avg, h_avg, span, wth, prom)
 
             # remove the first line from the training result
             self.training_result['loop'] = np.delete(self.training_result['loop'], 0, axis=0)
@@ -354,7 +363,7 @@ class Peako(object):
         t_avg = np.int(round(t_avg))
         h_avg = np.int(round(h_avg))
 
-        peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, prom, width)
+        peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, width, prom)
         # compute the similarity
         res = self.area_peaks_similarity(peako_peaks, array_out=False)
 
@@ -362,8 +371,7 @@ class Peako(object):
         self.training_result['scipy'] = np.append(self.training_result['scipy'],
                                                   [[t_avg, h_avg, span, width, prom, res]], axis=0)
 
-        # for differential evolution
-        # return negative similarity
+        # for differential evolution, return negative similarity:
         return -res
 
     def average_smooth_detect(self, t_avg, h_avg, span, width, prom):
@@ -457,7 +465,7 @@ class Peako(object):
 
         return peaks
 
-    def find_peaks_peako(self, t_avg, h_avg, span, prom, wth):
+    def find_peaks_peako(self, t_avg, h_avg, span, wth, prom):
         # call average_smooth_detect
         pass
 
@@ -566,6 +574,29 @@ class Peako(object):
         assert(len(self.marked_peaks_index) > 0), "no training mask available"
         assert(self.training_result['loop'].shape[0] + self.training_result['scipy'].shape[0] > 2), "no training result"
 
+    def check_store_found_peaks(self):
+        """
+        check if peak locations for optimal parameter combination have been stored, if not store them.
+        """
+
+        # for each of the optimization methods, check if there is a result in Peako.training_result
+        for j in self.training_result.keys():
+            if self.training_result[j].shape[0] > 1:
+                # if there is a result, extract the optimal parameter combination height averages, time averages, span,
+                # width, and prominence threshold
+                i_max = np.argmax(self.training_result[j][:, -1])
+                t, h, s, w, p = self.training_result[j][i_max, :-1]
+                # if there are no peaks stored in Peako.peako_peaks_training, find the peaks for each spectrum in the
+                # training files
+                if len(self.peako_peaks_training[j]) == 0:
+                    self.peako_peaks_training[j] = self.average_smooth_detect(t_avg=int(t), h_avg=int(h), span=s,
+                                                                              width=w, prom=p)
+                # or if the shape of the training data does not match the shape of the stored found peaks
+                elif self.peako_peaks_training[j][0]['C1PeakoPeaks'].values.shape[:2] != \
+                        self.spec_data[0]['C1Zspec'].shape[:2]:
+                    self.peako_peaks_training[j] = self.average_smooth_detect(t_avg=int(t), h_avg=int(h), span=s,
+                                                                              width=w, prom=p)
+
     def training_stats(self, make_3d_plots=False):
         """
         print out training statistics
@@ -648,6 +679,13 @@ class Peako(object):
         return fig, ax
 
     def plot_user_algorithm_spectrum(self, **kwargs):
+        """
+        Plot a cloud radar Doppler spectrum along with the user-marked peaks and the algorithm-detected peaks for each
+        of the training results in the Peako.peako_peaks_training dictionary.
+
+        :param kwargs: 'seed' : set seed to an integer number for reproducibility
+        :return:
+        """
 
         # assert that training has happened:
         self.assert_training()
@@ -659,6 +697,7 @@ class Peako(object):
         # select a random user-marked spectrum
         f = random.randint(0, len(self.marked_peaks_index) - 1)
         c = random.randint(0, len(self.marked_peaks_index[f]) - 1)
+        # this can be problematic if there are no marked spectra for one of the chirps...
         h_ind, t_ind = np.where(self.marked_peaks_index[f][c] == 1)
         i = random.randint(0, len(h_ind) - 1)
         velbins = self.spec_data[f][f'C{c+1}vel'].values
@@ -667,16 +706,10 @@ class Peako(object):
                               fill_value=self.fill_value)
         user_ind = user_ind[user_ind > 0]
 
+        # call check_store_found_peaks to make sure that there is peaks in Peako.peako_peaks_training
+        self.check_store_found_peaks()
 
-        # TODO move part below into a separate function and store DataArray in the Peako object
-        peako_peaks = {}
-        for j in self.training_result.keys():
-            if self.training_result[j].shape[0] > 1:
-                i_max = np.argmax(self.training_result[j][:, -1])
-                h, t, s, w, p = self.training_result[j][i_max, :-1]
-                peako_peaks[j] = self.average_smooth_detect(t_avg=int(t), h_avg=int(h), span=s, width=w, prom=p)
-
-       # plotting
+        # plotting
         fsz = 13
         star = matplotlib.path.Path.unit_regular_star(6)
         circle = matplotlib.path.Path.unit_circle()
@@ -689,14 +722,15 @@ class Peako(object):
         ax.plot(velbins, lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
 
         c_ind = 0
-        for j in peako_peaks.keys():
-            peako_ind = peako_peaks[j][f][f'C{c + 1}PeakoPeaks'].values[h_ind[i], t_ind[i], :]
-            peako_ind = peako_ind[peako_ind > 0]
+        for j in self.peako_peaks_training.keys():
+            if self.training_result[j].shape[0] > 1:
+                peako_ind = self.peako_peaks_training[j][f][f'C{c + 1}PeakoPeaks'].values[h_ind[i], t_ind[i], :]
+                peako_ind = peako_ind[peako_ind > 0]
 
-            ax.plot(velbins[peako_ind], lin2z(spectrum)[peako_ind], marker='o',
-                    color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
-                linestyle="None", label=f'PEAKO peaks {j}', markersize=8)
-            c_ind += 1
+                ax.plot(velbins[peako_ind], lin2z(spectrum)[peako_ind], marker='o',
+                        color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
+                        linestyle="None", label=f'PEAKO peaks {j}', markersize=[8, 7, 6][c_ind])
+                c_ind += 1
 
         ax.plot(velbins[user_ind], lin2z(spectrum)[user_ind], marker=cut_star, color='r',
                 linestyle="None", label='user peaks')
@@ -710,6 +744,61 @@ class Peako(object):
                      f'{format_hms(self.spec_data[f]["time"].values[int(t_ind[i])])}')
 
         return fig, ax
+
+    def test_peako(self, test_data, **kwargs):
+        """
+        Add testing data to the Peako object and print out some stats for the testing data set
+
+        :param test_data: list of netcdf files with hand-marked peaks
+        :param kwargs: 'seed' to pass on to Peako.plot_user_algorithm_spectrum
+        """
+        self.testing_files = test_data
+        self.testing_data = [xr.open_mfdataset(fin, combine='by_coords') for fin in test_data]
+        self.specfiles_test = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.testing_files]
+        self.spec_data_test = [xr.open_mfdataset(fin, combine='by_coords') for fin in self.specfiles_test]
+
+        # TODO !!Murks!! Find better solution for this
+        # copy the Peako object and replace training data with testing data to utilize the functions using spec_data
+        Q = copy.deepcopy(self)
+        Q.training_files = test_data
+        Q.training_data = self.testing_data
+        Q.specfiles = self.specfiles_test
+        Q.spec_data = self.spec_data_test
+        Q.marked_peaks_index = []
+        Q.create_training_mask()
+        Q.training_stats()
+        Q.plot_user_algorithm_spectrum(**kwargs)
+        self.peako_peaks_testing = Q.peako_peaks_training
+
+    def plot_numpeaks_timeheight(self, mode='training'):
+        """
+        Plot time-height plots of the number of found peaks by peako (for different optimization results if they are
+        available) and of the peaks marked by a human user, for each of the files in the list Peako.training_data or
+        Peako.testing_data
+
+        :param mode: (string) Either 'training' or 'testing'
+        :return:
+        """
+
+        if mode == 'training':
+            # call check_store_found_peaks to make sure that there is peaks in Peako.peako_peaks_training
+            self.check_store_found_peaks()
+            algorithm_peaks = self.peako_peaks_training
+            user_peaks = self.training_data
+        elif mode == 'testing':
+            algorithm_peaks = self.peako_peaks_testing
+            user_peaks = self.testing_data
+
+        # plot number of peako peaks for each of the training files and each of the optimization methods,
+        # and number of user-found peaks
+        # TODO write top level function for plotting time height of number of found peaks
+
+    def plot_CFAD(self):
+        """
+        plot contoured frequency by altitude diagram (CFAD)
+
+        """
+        pass
 
 
 class TrainingData(object):

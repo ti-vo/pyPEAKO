@@ -1,6 +1,10 @@
 How to use pyPEAKO
 ==================
 
+==============================
+Expected spectra file format
+==============================
+
 
 =======================
 Creating training data
