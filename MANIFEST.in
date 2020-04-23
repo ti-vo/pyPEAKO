@@ -1,4 +1,4 @@
 include *.txt
-recursive-include doc *.png
+recursive-include docs *.png
 recursive-include src *.py
 recursive-include tests *.py

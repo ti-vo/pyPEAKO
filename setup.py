@@ -17,7 +17,6 @@ setup(
     license='MIT',
     package_dir={'': 'src'},
     packages=find_packages(exclude=['docs', 'tests', 'playground']),
- #   py_modules=['mark_peaks', 'peako'],
     package_data={'src': ['sample_spectra.nc', 'marked_peaks_sample_spectra.nc']},
     python_requires='>=3.6',
     install_requires=['numpy>=1.16', 'scipy>=1.2', 'netCDF4>=1.4.2',

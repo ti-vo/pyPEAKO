@@ -129,4 +129,10 @@ on the resulting similarity.
       Example 3D plots of two variables (x and y axes) versus similarity (z axis)
 
 
-We can also look at a couple of example spectra
+We can also look at a couple of example spectra, in which the user has marked peaks by hand, along with the
+algorithm-detected peaks.
+
+
+==========
+Testing
+==========

@@ -14,11 +14,9 @@ parameters for detecting peaks in cloud radar Doppler spectra using user-generat
 
 Reference for PEAKO: [Kalesse et al. (2019), AMT](https://www.atmos-meas-tech.net/12/4591/2019/)
 
-<img src="doc/example_spectrum.png">
+Documentation is available at: [https://pypeako.readthedocs.io/en/latest/](https://pypeako.readthedocs.io/en/latest/)
 
 -------------------
-Python 3.6 or higher, xarray, numpy, scipy, json (probably)
-
 
 ## TBD : Installation
 I want this package to be available via pip so that one can simply do :
@@ -34,7 +32,7 @@ $ git clone https://github.com/ti-vo/pyPEAKO
 Then navigate to the main folder (pyPEAKO):
 
 ```
-$ python3 setup.py install --user
+$ pip install -e . 
 ```
 
 ## How PEAKO works
@@ -44,18 +42,6 @@ to be adjusted to work with the most current spectra file format.
 The cloudnet community will hopefully share their routines for bringing spectra files from different cloud radars into 
 the desired format. Ongoing discussion is happening in the [Cloudnet forum](https://forum.cloudnet.fmi.fi/)  .
 
-### creating training data
-To train PEAKO, it is necessary to mark peaks in some spectra by hand.  
-```python3
-import peako
-
-train = peako.TrainingData(['/path/to/file/spectra.nc'],
-                     num_spec=[20])
-train.mark_random_spectra()
-train.save_training_data()
-
-``` 
-The user marks the peaks in the center panel of the plotting window which pops up:
 
 ## Contributing
 If you want to help develop peako, feel free to contact me, or open an issue on GitHub. If you want to become an active 
@@ -64,4 +50,4 @@ To install PEAKO  along with the tools you need for developing and running tests
 ```bash
 $ pip install -e .[dev]
 ```
-in the directory containing the setup.py file.
+in the directory containing the setup.py file. Like this, you install pyPEAKO with the dev extras.
