@@ -7,7 +7,7 @@ with open("README.md") as readme:
 
 setup(
     name='pyPEAKO',  # pip install pypeako
-    version='0.0.2.post2',
+    version='0.0.2.post3',
     description='peak detection in cloud radar Doppler spectra',
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -17,8 +17,8 @@ setup(
     license='MIT',
     package_dir={'': 'src'},
     py_modules=['peako'], #find_packages(exclude=['docs', 'tests', 'playground']),
-    package_data={'src': ['sample_spectra.nc', 'marked_peaks_sample_spectra.nc']},
-    include_package_data=True,
+    package_data={'pyPEAKO': ['examples/sample_spectra.nc', 'examples/marked_peaks_sample_spectra.nc']},
+#    include_package_data=True,
     python_requires='>=3.6',
     install_requires=['numpy>=1.16', 'scipy>=1.2', 'netCDF4>=1.4.2',
                       'matplotlib>=3.0.2', 'xarray'],
