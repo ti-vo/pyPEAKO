@@ -263,6 +263,7 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks'):
 
     bar = fig.colorbar(pcmesh)
     ax.set_xlabel("Time [UTC]", fontweight='semibold', fontsize=12)
+    ax.set_ylabel("Range [km]", fontweight='semibold', fontsize=12)
     ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
     ax.xaxis.set_major_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 5)))
     ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 1)))
@@ -452,15 +453,18 @@ class Peako(object):
                     t_ind = np.tile(range(len(self.spec_data[f].time)), len(self.spec_data[f][f'C{c+1}range']))
                 var_string = f'C{c+1}Zspec'
 
-                for ind in range(len(h_ind)):
-                    # This will throw a RuntimeWarning : Mean of empty slice which can be annoying, so we're ignoring
-                    # warnings here.
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        avg_specs[var_string][t_ind[ind], h_ind[ind], :] = np.nanmean(
-                            self.spec_data[f][var_string].values[(t_ind[ind] - t_avg): (t_ind[ind] + t_avg + 1),
-                                                                 (h_ind[ind] - h_avg): (h_ind[ind] + h_avg + 1),
-                                                                 :], axis=(0, 1))
+                if t_avg == 0 and h_avg == 0:
+                    avg_specs[var_string][:, :, :] = self.spec_data[f][var_string].values[:, :, :]
+                else:
+                    for ind in range(len(h_ind)):
+                        # This will throw a RuntimeWarning : Mean of empty slice which can be annoying, so we're ignoring
+                        # warnings here.
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            avg_specs[var_string][t_ind[ind], h_ind[ind], :] = np.nanmean(
+                                self.spec_data[f][var_string].values[(t_ind[ind] - t_avg): (t_ind[ind] + t_avg + 1),
+                                                                     (h_ind[ind] - h_avg): (h_ind[ind] + h_avg + 1),
+                                                                     :], axis=(0, 1))
             avg_specs_list.append(avg_specs)
 
         return avg_specs_list
@@ -477,69 +481,6 @@ class Peako(object):
         length of the spectra (input parameter) list.
         """
         peaks = []
-        for f in range(len(spectra)):
-            peaks_dataset = xr.Dataset()
-            for c in range(len(spectra[f].chirp)):
-                t_ind, h_ind = np.where(self.marked_peaks_index[f][c] == 1)
-                if all_spectra:
-                    h_ind = np.repeat(range(len(spectra[f][f'C{c+1}range'])), len(spectra[f].time))
-                    t_ind = np.tile(range(len(spectra[f].time)), len(spectra[f][f'C{c+1}range']))
-                # create an xarray dataset and add one empty data array to it
-                peaks_array = xr.Dataset(data_vars={f'C{c+1}PeakoPeaks': xr.DataArray(np.full(
-                                                            (spectra[f][f'C{c+1}Zspec'].values.shape[0:2] +
-                                                             (self.max_peaks,)), np.nan, dtype=np.int),
-                                                            dims=['time', f'C{c+1}range', 'peaks'],
-                                                            coords=[ spectra[f]['time'],spectra[f][f'C{c+1}range'],
-                                                                    xr.DataArray(range(self.max_peaks))])})
-
-                # convert width_thresh units from m/s to # of Doppler bins:
-                width_thresh = width_thresh/np.nanmedian(np.diff(self.spec_data[f][f'C{c+1}vel'].values))
-                # loop over height-time combinations where spectra were marked
-                for h, t in zip(h_ind, t_ind):
-                    # extract one spectrum at a certain height/ time, convert to dBZ and fill masked values with minimum
-                    # of spectrum
-                    spectrum = spectra[f][f'C{c + 1}Zspec'].values[t, h, :]
-                    spectrum = lin2z(spectrum)
-                    spectrum.data[spectrum.mask] = np.nanmin(spectrum)
-                    spectrum = spectrum.data
-                    # call scipy.signal.find_peaks to detect peaks in the (logarithmic) spectrum
-                    # it is important that nan values are not included in the spectrum passed to si
-                    locs, props = si.find_peaks(spectrum, prominence=prom)
-                    # find left and right edges of peaks
-                    le, re = find_edges(spectra[f][f'C{c+1}Zspec'].values[t, h, :], self.fill_value, locs)
-                    # compute the width
-                    width = peak_width(spectra[f][f'C{c+1}Zspec'].values[t, h, :], locs, le, re)
-                    locs = locs[width > width_thresh]
-                    locs = locs[0: self.max_peaks] if len(locs) > self.max_peaks else locs
-                    peaks_array[f'C{c+1}PeakoPeaks'].values[t, h, 0:len(locs)] = locs
-                # update the dataset (add the peaks_array dataset)
-                peaks_dataset.update(other=peaks_array)
-            # add chirps
-            peaks_dataset = peaks_dataset.assign({'chirp': spectra[f].chirp})
-            # and append it to the list
-            peaks.append(peaks_dataset)
-
-        return peaks
-
-    def find_peaks_peako(self, t_avg, h_avg, span, wth, prom):
-        # call average_smooth_detect
-        pass
-
-    def find_peaks_peaktree(self, prom):
-        pass
-
-    def smooth_spectra(self, spectra, span):
-        """
-        smooth an array of spectra. 'loess' and 'lowess' methods apply a Savitzky-Golay filter to an array.
-        Refer to scipy.signal.savgol_filter for documentation on the 1-d filter. 'loess' means that polynomial is
-        degree 2; lowess means polynomial is degree 1.
-
-        :param spectra: list of Datasets of spectra
-        :param span: span used for loess/ lowess smoothing
-        :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
-        """
-        method = self.smoothing_method
-        spectra_out = [i.copy(deep=True) for i in spectra]
         for f in range(len(spectra)):
             for c in range(len(spectra[f].chirp)):
                 var_string = f'C{c+1}vel'
