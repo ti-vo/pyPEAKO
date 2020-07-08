@@ -798,29 +798,25 @@ class Peako(object):
         training_result = self.training_result[key][k]
         fig, ax = plt.subplots(2, 2, subplot_kw=dict(projection='3d'))
         ax[0, 0].scatter(training_result[:, 0], training_result[:, 1], training_result[:, -1], zdir='z',
-                         c=training_result[:, -1], cmap='seismic', vmin=-np.nanmax(training_result[:, -1]),
-                         vmax=np.nanmax(training_result[:, -1]))
+                         c=training_result[:, -1], cmap='seismic')
         ax[0, 0].set_xlabel('height averages')
         ax[0, 0].set_ylabel('time averages')
         ax[0, 0].set_zlabel('similarity')
 
         ax[1, 1].scatter(training_result[:, 3], training_result[:, 2], training_result[:, -1], zdir='z',
-                         c=training_result[:, -1], cmap='seismic', vmin=-np.nanmax(training_result[:, -1]),
-                         vmax=np.nanmax(training_result[:, -1]))
+                         c=training_result[:, -1], cmap='seismic')
         ax[1, 1].set_xlabel('width')
         ax[1, 1].set_ylabel('span')
         ax[1, 1].set_zlabel('similarity')
 
         ax[0, 1].scatter(training_result[:, 4], training_result[:, 3], training_result[:, -1], zdir='z',
-                         c=training_result[:, -1], cmap='seismic', vmin=-np.nanmax(training_result[:, -1]),
-                         vmax=np.nanmax(training_result[:, -1]))
+                         c=training_result[:, -1], cmap='seismic')
         ax[0, 1].set_xlabel('prom')
         ax[0, 1].set_ylabel('width')
         ax[0, 1].set_zlabel('similarity')
 
         ax[1, 0].scatter(training_result[:, 4], training_result[:, 1], training_result[:, -1], zdir='z',
-                         c=training_result[:, -1], cmap='seismic', vmin=-np.nanmax(training_result[:, -1]),
-                         vmax=np.nanmax(training_result[:, -1]))
+                         c=training_result[:, -1], cmap='seismic')
         ax[1, 0].set_xlabel('prom')
         ax[1, 0].set_ylabel('time averages')
         ax[1, 0].set_zlabel('similarity')
