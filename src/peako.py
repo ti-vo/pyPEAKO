@@ -170,7 +170,7 @@ def area_above_floor(left_edge, right_edge, spectrum, noise_floor, velbins):
     spectrum_above_noise = [max(x, 0) for x in list(spectrum-noise_floor)]
     spectrum_above_noise = np.array(spectrum_above_noise)
     # Riemann sum (approximation of area):
-    area = spectrum_above_noise[left_edge:right_edge].sum() * (velbins[1]-velbins[0])
+    area = np.nansum(spectrum_above_noise[left_edge:right_edge]) * (velbins[1]-velbins[0])
 
     return area
 
@@ -380,12 +380,10 @@ class Peako(object):
             training_index = [[np.where(training_mask[f][c] == 1) for c in range(len(training_mask[f]))]
                       for f in range(len(training_mask))]
 
-            training_mask[0][0].values[training_index[0][0]]
-            training_mask[0][0].C1range[training_index[0][0][0]]
 
             list_of_lists = [[len(i[j][0]) for j in range(len(i))] for i in training_index]
             num_marked_spectra = np.sum(list_of_lists)
-            cv = KFold(n_splits=self.k, random_state=42, shuffle=False)
+            cv = KFold(n_splits=self.k, random_state=42, shuffle=True)
             self.current_k = 0
             for index_training, index_testing in cv.split(range(num_marked_spectra)):
                 this_training_mask = copy.deepcopy(empty_training_mask)
@@ -617,7 +615,7 @@ class Peako(object):
         smooth an array of spectra. 'loess' and 'lowess' methods apply a Savitzky-Golay filter to an array.
         Refer to scipy.signal.savgol_filter for documentation on the 1-d filter. 'loess' means that polynomial is
         degree 2; lowess means polynomial is degree 1.
-        :param spectra: list of Datasets of spectra
+        :param spectra: list of Datasets of spectra, linear units
         :param span: span used for loess/ lowess smoothing
         :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
         """
@@ -663,6 +661,9 @@ class Peako(object):
                     # convert velocities to indices
                     user_peaks = np.asarray([argnearest(velbins, val) for val in user_peaks])
                     spectrum = self.spec_data[f][f'C{c+1}Zspec'].values[t, h, :]
+                    #spectrum[spectrum == self.fill_value] = np.nan
+                    spectrum_db = lin2z(spectrum)
+                    spectrum_db[spectrum == self.fill_value] = 0.0
                     user_peaks.sort()
                     peako_peaks = algorithm_peaks[f][f'C{c+1}PeakoPeaks'].values[t, h, :]
                     peako_peaks = peako_peaks[peako_peaks > 0]
@@ -675,7 +676,7 @@ class Peako(object):
                         # compute maximum overlapping area
                         user_ind, alg_ind, overlap_area = overlapping_area([le_user_peaks, re_user_peaks],
                                                                            [le_alg_peaks, re_alg_peaks],
-                                                                           spectrum, np.nanmin(spectrum), velbins)
+                                                                           spectrum_db, np.nanmin(spectrum_db), velbins)
                         similarity = similarity + overlap_area
                         if user_ind is not None:
                             user_peaks = np.delete(user_peaks, user_ind)
@@ -688,11 +689,11 @@ class Peako(object):
 
                     # Subtract area of non-overlapping regions
                     for i in range(len(le_alg_peaks)):
-                        similarity = similarity - area_above_floor(le_alg_peaks[i], re_alg_peaks[i], spectrum,
-                                                                   np.nanmin(spectrum), velbins)
+                        similarity = similarity - area_above_floor(le_alg_peaks[i], re_alg_peaks[i], spectrum_db,
+                                                                   np.nanmin(spectrum_db), velbins)
                     for i in range(len(le_user_peaks)):
-                        similarity = similarity - area_above_floor(le_user_peaks[i], re_user_peaks[i], spectrum,
-                                                                   np.nanmin(spectrum), velbins)
+                        similarity = similarity - area_above_floor(le_user_peaks[i], re_user_peaks[i], spectrum_db,
+                                                                   np.nanmin(spectrum_db), velbins)
                     #print(user_peaks, algorithm_peaks, similarity)
 
                     if not array_out:
@@ -742,7 +743,9 @@ class Peako(object):
         """
         print out training statistics
         :param make_3d_plots: bool: Default is False. If set to True, plot_3d_plots will be called
-        """
+        :param kwargs: k: number of subset (if k-fold cross-validation is used) for which statistics should be returned.
+         Defaults to 0
+         """
 
         self.assert_training()
         k = kwargs['k'] if 'k' in kwargs else 0
@@ -1100,7 +1103,7 @@ class TrainingData(object):
                                                                         :]
 
         #print(f'time index center: {timeindex_center}, height index center: {heightindex_center}')
-        if not np.sum(~(this_spectrum_center.values == -999)) < 2:
+        if not np.sum(~(this_spectrum_center.values == self.spec_data[n_file].attrs['_FillValue'])) < 2:
             # if this spectrum is not empty, we plot 3x3 panels with shared x and y axes
             fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
             fig.suptitle(f'Mark peaks in spectrum in center panel. Fig. {self.plot_count[n_file]+1} out of '
