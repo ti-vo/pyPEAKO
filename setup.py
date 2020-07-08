@@ -7,7 +7,7 @@ with open("README.md") as readme:
 
 setup(
     name='pyPEAKO',  # pip install pypeako
-    version='0.0.2.post5',
+    version='0.0.3.post2',
     description='peak detection in cloud radar Doppler spectra',
     long_description=long_description,
     long_description_content_type="text/markdown",
