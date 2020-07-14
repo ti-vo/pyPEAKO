@@ -371,6 +371,8 @@ def smooth_spectra(averaged_spectra, spec_data, span, method):
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
     spectra_out = [i.copy(deep=True) for i in averaged_spectra]
+    if span == 0.0:
+        return spectra_out
     for f in range(len(averaged_spectra)):
         for c in range(len(averaged_spectra[f].chirp)):
             var_string = f'C{c+1}vel'
@@ -452,7 +454,7 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
 
 class Peako(object):
     def __init__(self, training_data=[], peak_detection='peako', optimization_method='loop',
-                 smoothing_method='loess', max_peaks=5, k=0, **kwargs):
+                 smoothing_method='loess', max_peaks=5, k=0, verbosity=0, **kwargs):
 
         """
         initialize a Peako object
@@ -470,13 +472,14 @@ class Peako(object):
         :param k: integer specifying parameter k in k-fold cross-validation. If it's set to 0 (the default), the
         training data is not split. If it's different from 0, training data is split into k subsets (folds), where
         each fold will be used as the test set one time.
+        :param verbosity: level of how much detail is printed into the console (debugging info)
         :param kwargs 'training_params' = dictionary containing 't_avg', 'h_avg', 'span', 'width' and 'prom' values over
         which to loop if optimization_method is set to 'loop'.
         """
         self.training_files = training_data
         self.training_data = [xr.open_mfdataset(fin, combine='by_coords') for fin in training_data]
         self.specfiles = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
-        self.spec_data = [xr.open_mfdataset(fin) for fin in self.specfiles]
+        self.spec_data = [xr.open_mfdataset(fin, combine='by_coords') for fin in self.specfiles]
         self.peak_detection_method = peak_detection
         self.optimization_method = optimization_method
         self.smoothing_method = smoothing_method
@@ -498,6 +501,7 @@ class Peako(object):
         self.specfiles_test = []
         self.spec_data_test = []
         self.plot_dir = kwargs['plot_dir'] if 'plot_dir' in kwargs else ''
+        self.verbosity = verbosity
 
     def create_training_mask(self):
         """
@@ -511,7 +515,7 @@ class Peako(object):
             for c in range(len(self.training_data[f].chirp)):
                 var_string = f'C{c+1}peaks'
                 dim_string = f'C{c+1}range'
-                array_list.append(xr.DataArray(~(self.training_data[f][var_string].values[:, :, 0] == -999)*1,
+                array_list.append(xr.DataArray(~(self.training_data[f][var_string].values[:, :, 0] == self.fill_value)*1,
                                                dims=[dim_string, 'time']))
             list_out.append(array_list)
         if not self.k_fold_cv:
@@ -547,8 +551,10 @@ class Peako(object):
             self.current_k = 0
             for index_training, index_testing in cv.split(range(num_marked_spectra)):
                 this_training_mask = copy.deepcopy(empty_training_mask)
-                print("Train Index: ", index_training, "\n")
-                print("Test Index: ", index_testing)
+                if self.verbosity > 0:
+                    print("k: ", self.current_k, "\n")
+                    print("Train Index: ", index_training, "\n")
+                    print("Test Index: ", index_testing)
                 for f in range(len(index_training)):
                     i_1, i_2, left_bound = find_index_in_sublist(index_training[f], training_index)
                     this_training_mask[i_1][i_2].values[training_index[i_1][i_2][0][index_training[f]-left_bound],
@@ -591,7 +597,9 @@ class Peako(object):
                                 self.training_result['loop'][self.current_k] = np.append(self.training_result['loop'][
                                     self.current_k], [[t_avg, h_avg, span, wth, prom, similarity]],
                                                                          axis=0)
-                                print(similarity, t_avg, h_avg, span, wth, prom)
+                                if self.verbosity > 0:
+                                    print(f"similarity: {similarity}, t:{t_avg}, h:{h_avg}, span:{span}, width:{wth}, "
+                                          f"prom:{prom}")
 
             # remove the first line from the training result
             self.training_result['loop'][self.current_k] = np.delete(self.training_result['loop'][self.current_k], 0,
@@ -641,7 +649,9 @@ class Peako(object):
         t_avg = np.int(round(t_avg))
         h_avg = np.int(round(h_avg))
 
-        peako_peaks = self.average_smooth_detect(t_avg, h_avg, span, width, prom)
+        peako_peaks = average_smooth_detect(self.spec_data, t_avg=t_avg, h_avg=h_avg, span=span, width=width, prom=prom,
+                                            smoothing_method=self.smoothing_method, max_peaks=self.max_peaks,
+                                            fill_value=self.fill_value, marked_peaks_index=self.marked_peaks_index)
         # compute the similarity
         res = self.area_peaks_similarity(peako_peaks, array_out=False)
 
@@ -773,33 +783,6 @@ class Peako(object):
 
     def find_peaks_peaktree(self, prom):
         pass
-
-    def smooth_spectra(self, spectra, span):
-        """
-        smooth an array of spectra. 'loess' and 'lowess' methods apply a Savitzky-Golay filter to an array.
-        Refer to scipy.signal.savgol_filter for documentation on the 1-d filter. 'loess' means that polynomial is
-        degree 2; lowess means polynomial is degree 1.
-        :param spectra: list of Datasets of spectra, linear units
-        :param span: span used for loess/ lowess smoothing
-        :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
-        """
-        method = self.smoothing_method
-        spectra_out = [i.copy(deep=True) for i in spectra]
-        for f in range(len(spectra)):
-            for c in range(len(spectra[f].chirp)):
-                var_string = f'C{c+1}vel'
-                velbins = self.spec_data[f][var_string].values
-                window_length = round_to_odd(span * len(velbins))
-                if method == 'loess':
-                    spectra_out[f][f'C{c+1}Zspec'].values = scipy.signal.savgol_filter(
-                        spectra[f][f'C{c+1}Zspec'].values, window_length, polyorder=2, axis=2, mode='nearest')
-                elif method == 'lowess':
-                    spectra_out[f][f'C{c + 1}Zspec'].values = scipy.signal.savgol_filter(
-                        spectra[f][f'C{c + 1}Zspec'].values,
-                        window_length,
-                        polyorder=1, axis=2,
-                        mode='nearest')
-        return spectra_out
 
     def area_peaks_similarity(self, algorithm_peaks, array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
@@ -1165,6 +1148,7 @@ class TrainingData(object):
         self.training_data_out = []
         self.peaks_ncfiles = []
         self.plot_count = []
+        self.fill_value = self.spec_data[0]._FillValue
 
         for i in range(len(self.spec_data)):
             self.num_spec.append(num_spec[0])
@@ -1197,7 +1181,7 @@ class TrainingData(object):
         for f in range(len(self.spec_data)):
             self.tdim.append(len(self.spec_data[f]['time']))
             self.rdim.append(self.chirps_to_ranges(f)[-1])
-            self.training_data_out.append(np.full((self.tdim[-1], self.rdim[-1], self.max_peaks), np.float64(-999)))
+            self.training_data_out.append(np.full((self.tdim[-1], self.rdim[-1], self.max_peaks), self.fill_value))
             ncfile = '/'.join(self.specfiles_in[f].split('/')[0:-1]) + \
                      '/' + 'marked_peaks_' + self.specfiles_in[f].split('/')[-1]
             self.peaks_ncfiles.append(ncfile)
