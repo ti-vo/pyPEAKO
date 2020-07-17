@@ -21,7 +21,6 @@ def lin2z(array):
     """convert linear values to dB (for np.array or single number)"""
     return 10 * np.ma.log10(array)
 
-
 def format_hms(unixtime):
     """format time stamp in seconds since 01.01.1970 00:00 UTC to HH:MM:SS"""
     return datetime.datetime.utcfromtimestamp(unixtime).strftime("%H:%M:%S")
@@ -409,7 +408,7 @@ def average_single_bin(specdata_values, B, bin):
 
 def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     print('averaging...')
-    processes = kwargs['procs'] if 'procs' in kwargs else 5
+#    processes = kwargs['procs'] if 'procs' in kwargs else 5
     avg_specs_list = []  # initialize empty list
     for f in range(len(spec_data)):
         # average spectra over neighbors in time-height
@@ -421,18 +420,19 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
             if t_avg == 0 and h_avg == 0:
                 avg_specs[var_string][:, :, :] = spec_data[f][var_string].values[:, :, :]
             else:
-                iterable = range(avg_specs[var_string].values.shape[2])
-                pn = Pool(processes)
+#                iterable = range(avg_specs[var_string].values.shape[2])
+#                pn = Pool(processes)
                 B = np.ones((1+t_avg*2, 1+h_avg*2))/((1+t_avg*2)* (1+h_avg*2))
-                func = partial(average_single_bin, spec_data[f][var_string].values, B)
-                res = pn.map(func, iterable)
-                array_out = np.swapaxes(np.array(res), 0, 2)
-                array_out = array_out.swapaxes(0, 1)
-                avg_specs[var_string][:, :, :] = array_out
-#              for d in range(avg_specs[var_string].values.shape[2]):
-#                  A = spec_data[f][var_string].values[:, :, d]
-#                  C = scipy.signal.convolve2d(A, B, 'same')
-#                  avg_specs[var_string][:, :, d] = C
+#                func = partial(average_single_bin, spec_data[f][var_string].data, B)
+#                res = pn.map(func, iterable)
+#                array_out = np.swapaxes(np.array(res), 0, 2)
+#                array_out = array_out.swapaxes(0, 1)
+#                avg_specs[var_string][:, :, :] = array_out
+                for d in range(avg_specs[var_string].values.shape[2]):
+                   A = spec_data[f][var_string].data[:, :, d]
+                   C = scipy.signal.convolve2d(A, B, 'same')
+                   avg_specs[var_string][:, :, d] = C
+
         avg_specs_list.append(avg_specs)
 
     return avg_specs_list
@@ -488,33 +488,38 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
         peaks_dataset = xr.Dataset()
         for c in range(len(spectra[f].chirp)):
 
+            # create an xarray dataset and add one empty data array to it
+            peaks_array = xr.Dataset(data_vars={f'C{c+1}PeakoPeaks': xr.DataArray(np.full(
+                (spectra[f][f'C{c+1}Zspec'].values.shape[0:2] +
+                 (max_peaks,)), np.nan, dtype=np.int),
+                dims=['time', f'C{c+1}range', 'peaks'],
+                coords=[spectra[f]['time'],spectra[f][f'C{c+1}range'],
+                        xr.DataArray(range(max_peaks))])})
+
+            # convert width_thresh units from m/s to # of Doppler bins:
+            width_thresh = width_thresh/np.nanmedian(np.diff(spec_data[f][f'C{c+1}vel'].values))
+
             if all_spectra:
-                h_ind = np.repeat(range(len(spectra[f][f'C{c+1}range'])), len(spectra[f].time))
-                t_ind = np.tile(range(len(spectra[f].time)), len(spectra[f][f'C{c+1}range']))
+
+                peaks_all_spectra = xr.apply_ufunc(peak_detection_dask, spectra[f][f'C{c + 1}Zspec'], prom, fill_value, width_thresh,
+                                   max_peaks, dask='parallelized')
+                peaks_array[f'C{c + 1}PeakoPeaks'].data = peaks_all_spectra.data[:, :, 0:max_peaks]
+
             else:
                 assert 'marked_peaks_index' in kwargs, "if param all_spectra is set to False, you have to supply " \
                                                        "marked_peaks_index as key word argument"
                 marked_peaks_index = kwargs['marked_peaks_index']
                 t_ind, h_ind = np.where(marked_peaks_index[f][c] == 1)
-            # create an xarray dataset and add one empty data array to it
-            peaks_array = xr.Dataset(data_vars={f'C{c+1}PeakoPeaks': xr.DataArray(np.full(
-                                                        (spectra[f][f'C{c+1}Zspec'].values.shape[0:2] +
-                                                         (max_peaks,)), np.nan, dtype=np.int),
-                                                        dims=['time', f'C{c+1}range', 'peaks'],
-                                                        coords=[spectra[f]['time'],spectra[f][f'C{c+1}range'],
-                                                                xr.DataArray(range(max_peaks))])})
 
-            # convert width_thresh units from m/s to # of Doppler bins:
-            width_thresh = width_thresh/np.nanmedian(np.diff(spec_data[f][f'C{c+1}vel'].values))
-            # loop over height-time combinations where spectra were marked
-            iterable = [[t, h] for t, h in zip(t_ind, h_ind)]
-            pn = Pool(processes=procs)
-            func = partial(detect_single_spectrum, spectra[f][f'C{c + 1}Zspec'].values, prom, fill_value, width_thresh,
-                                                  max_peaks)
-            res = pn.map(func, iterable)
-            for i,j in enumerate(res):
-                t, h = iterable[i]
-                peaks_array[f'C{c + 1}PeakoPeaks'].values[t, h, 0:len(j)] = j
+                # loop over height-time combinations where spectra were marked
+                iterable = [[t, h] for t, h in zip(t_ind, h_ind)]
+                pn = Pool(processes=procs)
+                func = partial(peak_detection_multiprocessing, spectra[f][f'C{c + 1}Zspec'].data, prom, fill_value, width_thresh,
+                                                      max_peaks)
+                res = pn.map(func, iterable)
+                for i, j in enumerate(res):
+                    t, h = iterable[i]
+                    peaks_array[f'C{c + 1}PeakoPeaks'].data[t, h, 0:len(j)] = j
 
             # update the dataset (add the peaks_array dataset)
             peaks_dataset.update(other=peaks_array)
@@ -525,24 +530,40 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
 
     return peaks
 
+def peak_detection_dask(numpy_array, prom, fill_value, width_thresh, max_peaks):
+    spectra = lin2z(numpy_array)
+    fillvalue = np.ma.filled(np.nanmin(spectra, axis=2)[:, :, np.newaxis], -100.)
+    spectra = np.ma.filled(spectra, fillvalue)
+    out = np.apply_along_axis(detect_single_spectrum, 2, spectra, prom=prom, fill_value=fill_value,
+                        width_thresh=width_thresh, max_peaks=max_peaks)
+    return out
 
-def detect_single_spectrum(specdata_values, prom, fill_value, width_thresh, max_peaks, th_indlist):
-    t, h = th_indlist
-    spectrum = specdata_values[t, h, :]
+def peak_detection_multiprocessing(spectra, prom, fill_value, width_thresh, max_peaks, th_ind):
+    t, h = th_ind
+    spectrum = spectra[t, h, :]
     spectrum = lin2z(spectrum)
     spectrum.data[spectrum.mask] = np.nanmin(spectrum)
     spectrum = spectrum.data
+    locs = detect_single_spectrum(spectrum, prom, fill_value, width_thresh, max_peaks)
+    locs = locs[0:max_peaks]
+    return locs
+
+def detect_single_spectrum(spectrum, prom, fill_value, width_thresh, max_peaks):
+
     # call scipy.signal.find_peaks to detect peaks in the (logarithmic) spectrum
     # it is important that nan values are not included in the spectrum passed to si
     locs, props = si.find_peaks(spectrum, prominence=prom)
     # find left and right edges of peaks
-    le, re = find_edges(specdata_values[t, h, :], fill_value, locs)
+    le, re = find_edges(spectrum, fill_value, locs)
     # compute the width
-    width = peak_width(specdata_values[t, h, :], locs, le, re)
+    width = peak_width(spectrum, locs, le, re)
     locs = locs[width > width_thresh]
     locs = locs[0: max_peaks] if len(locs) > max_peaks else locs
-    return locs
-
+    # TODO
+    #  Murks : artificially create output dimension of same length as Doppler bins to avoid xarray value error
+    out = np.full(spectrum.shape[0], np.nan, dtype=int)
+    out[range(len(locs))] = locs
+    return out
 
 class Peako(object):
     def __init__(self, training_data=[], peak_detection='peako', optimization_method='loop',
