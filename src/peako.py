@@ -274,7 +274,7 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks'):
 
     for c in range(chirp):
         pcmesh = ax.pcolormesh(matplotlib.dates.date2num(dt_list[:]),
-                               data[f'C{c+1}range'].values/1000, np.transpose(np.sum(data[f'C{c+1}{key}'].values > -900,
+                               data['range'].values/1000, np.transpose(np.sum(data[f'{key}'].values > -900,
                                                                         axis=2)), cmap=cmap, vmin=0, norm=norm,
                                vmax=maxpeaks)
 
@@ -291,16 +291,13 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks'):
 
 def plot_spectrum_peako_peaks(peaks_dataset, spec_dataset, height, time, key='PeakoPeaks'):
 
-    ranges = np.array([j for i in [peaks_dataset[f'C{i+1}range'].values for i in range(len(peaks_dataset.chirp))]
-                       for j in i])
-    bounds = [0] + [peaks_dataset[f'C{i+1}range'].values[-1] for i in range(len(peaks_dataset.chirp))]
-    chirp_ind = np.digitize(height, bounds)
-    range_ind = argnearest(peaks_dataset[f'C{chirp_ind}range'].values, height)
+    range_ind = argnearest(peaks_dataset.range.values, height)
     time_ind = argnearest(peaks_dataset.time, (time - datetime.datetime(1970, 1, 1)).total_seconds())
-    peaks = peaks_dataset[f'C{chirp_ind}{key}'].values[time_ind, range_ind, :]
-    peaks = peaks[peaks>0]
-    spectrum = spec_dataset[f'C{chirp_ind}Zspec'].values[time_ind, range_ind, :]
-    velbins = spec_dataset[f'C{chirp_ind}vel'].values
+    peaks = peaks_dataset[f'{key}'].values[time_ind, range_ind, :]
+    peaks = peaks[peaks > 0]
+    spectrum = spec_dataset['doppler_spectrum'].values[time_ind, range_ind, :]
+    chirp_ind = np.digitize(range_ind, spec_dataset.rg_offsets+1)
+    velbins = spec_dataset['velocity_vectors'].values[chirp_ind, :]
 
     fig, ax = plt.subplots(1)
     ax.plot(velbins[peaks], lin2z(spectrum)[peaks], marker='o',
@@ -314,7 +311,7 @@ def plot_spectrum_peako_peaks(peaks_dataset, spec_dataset, height, time, key='Pe
     ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
     ax.legend(fontsize=13)
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])
-    ax.set_title(f'spectrum at {round(spec_dataset[f"C{chirp_ind}range"].values[range_ind])} m, '
+    ax.set_title(f'spectrum at {round(spec_dataset.range.values[range_ind])} m, '
                  f'{format_hms(spec_dataset["time"].values[time_ind])}')
     return fig, ax
 
