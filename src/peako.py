@@ -279,15 +279,65 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks'):
                                vmax=maxpeaks)
 
     bar = fig.colorbar(pcmesh)
+    time_extend = dt_list[-1] - dt_list[0]
+    ax = set_xticks_and_xlabels(ax, time_extend)
+
     ax.set_xlabel("Time [UTC]", fontweight='semibold', fontsize=12)
     ax.set_ylabel("Range [km]", fontweight='semibold', fontsize=12)
-    ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
-    ax.xaxis.set_major_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 5)))
-    ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 1)))
     fig.tight_layout()
     bar.ax.set_ylabel('number of peaks', fontweight='semibold', fontsize=12)
     return fig, ax
 
+
+def set_xticks_and_xlabels(ax, time_extend):
+    """This function is copied from pylarda and sets the ticks and labels of the x-axis
+    (only when the x-axis is time in UTC).
+
+    Options:
+        -   time_extend > 7 days:               major ticks every 2 day,  minor ticks every 12 hours
+        -   7 days > time_extend > 2 days:      major ticks every day, minor ticks every  6 hours
+        -   2 days > time_extend > 1 days:      major ticks every 12 hours, minor ticks every  3 hours
+        -   1 days > time_extend > 6 hours:     major ticks every 3 hours, minor ticks every  30 minutes
+        -   6 hours > time_extend > 1 hour:     major ticks every hour, minor ticks every  15 minutes
+        -   else:                               major ticks every 15 minutes, minor ticks every  5 minutes
+
+    Args:
+        ax (matplotlib axis): axis in which the x-ticks and labels have to be set
+        time_extend (timedelta): time difference of t_end - t_start
+
+    Returns:
+        ax (matplotlib axis): axis with new ticks and labels
+    """
+    if time_extend > datetime.timedelta(days=7):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%b %d'))
+        ax.xaxis.set_major_locator(matplotlib.dates.DayLocator(bymonthday=range(1, 32, 2)))
+        ax.xaxis.set_minor_locator(matplotlib.dates.HourLocator(byhour=range(0, 24, 12)))
+    elif datetime.timedelta(days=7) > time_extend > datetime.timedelta(days=2):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%b %d'))
+        ax.xaxis.set_major_locator(matplotlib.dates.HourLocator(byhour=[0]))
+        ax.xaxis.set_minor_locator(matplotlib.dates.HourLocator(byhour=range(0, 24, 6)))
+    elif datetime.timedelta(days=2) > time_extend > datetime.timedelta(hours=25):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%b %d\n%H:%M'))
+        ax.xaxis.set_major_locator(matplotlib.dates.HourLocator(byhour=range(0, 24, 12)))
+        ax.xaxis.set_minor_locator(matplotlib.dates.HourLocator(byhour=range(0, 24, 3)))
+    elif datetime.timedelta(hours=25) > time_extend > datetime.timedelta(hours=6):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(matplotlib.dates.HourLocator(byhour=range(0, 24, 3)))
+        ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 30)))
+    elif datetime.timedelta(hours=6) > time_extend > datetime.timedelta(hours=2):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(matplotlib.dates.HourLocator(interval=1))
+        ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 15)))
+    elif datetime.timedelta(hours=2) > time_extend > datetime.timedelta(minutes=15):
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 30)))
+        ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 5)))
+    else:
+        ax.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 5)))
+        ax.xaxis.set_minor_locator(matplotlib.dates.MinuteLocator(byminute=range(0, 60, 1)))
+
+    return ax
 
 def plot_spectrum_peako_peaks(peaks_dataset, spec_dataset, height, time, key='PeakoPeaks'):
 
@@ -360,7 +410,6 @@ def average_single_bin(specdata_values, B, bin):
 
 def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     print('averaging...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
-#    processes = kwargs['procs'] if 'procs' in kwargs else 5
     avg_specs_list = []  # initialize empty list
     for f in range(len(spec_data)):
         # average spectra over neighbors in time-height
