@@ -248,19 +248,21 @@ def vel_to_ind(velocities, velbins, fill_value):
     return indices
 
 
-def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks'):
+def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
+
     """
 
     :param data: xarray.dataset containing range, time and number of peaks
     :param maxpeaks: maximum number of peaks
     :param key: key (name) of the number of peaks in data
+    :param kwargs: 'figsize', 'cmap'
     :return: fig, ax matplotlib.pyplot.subplots()
     """
-
+    figsize = kwargs['figsize'] if 'figsize' in kwargs else [10, 5.7]
     chirp = len(data.chirp)
-    fig, ax = plt.subplots(1, figsize=[10, 5.7])
+    fig, ax = plt.subplots(1, figsize=figsize)
     dt_list = [datetime.datetime.utcfromtimestamp(time) for time in data.time.values]
-    cmap = plt.cm.viridis  # define the colormap
+    cmap = kwargs['cmap'] if 'cmap' in kwargs else plt.cm.viridis  # define the colormap
     # extract all colors from the .jet map
     cmaplist = [cmap(i) for i in range(cmap.N)]
 
