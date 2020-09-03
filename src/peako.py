@@ -780,7 +780,6 @@ class Peako(object):
         # for differential evolution, return negative similarity:
         return -res
 
-
     def area_peaks_similarity(self, algorithm_peaks, array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
             peaks in a radar Doppler spectrum
@@ -1003,7 +1002,7 @@ class Peako(object):
 
         i = random.randint(0, len(h_ind) - 1)
         c = np.digitize(h_ind[i], [0] + list(self.spec_data[f].rg_offsets.values))
-        velbins = self.spec_data[f]['velocity_vectors'].values[c, :]
+        velbins = self.spec_data[f]['velocity_vectors'].values[c-1, :]
         spectrum = self.spec_data[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
         user_ind = vel_to_ind(self.training_data[f]['peaks'].values[t_ind[i], h_ind[i], :], velbins=velbins,
                               fill_value=self.fill_value)
