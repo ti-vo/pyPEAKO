@@ -37,7 +37,7 @@ def round_to_odd(f):
     """round to odd number
     :param f: float number to be rounded to odd number
     """
-    return int(np.ceil(f / 2.) * 2 + 1)
+    return round(f) if round(f) % 2 == 1 else round(f) + 1
 
 
 def argnearest(array, value):
@@ -108,7 +108,7 @@ def find_edges(spectrum, fill_value, peak_locations):
     """
     Find the indices of left and right edges of peaks in a spectrum
 
-    :param spectrum: a single spectrum in linear units
+    :param spectrum: a single spectrum in logarithmic units
     :param peak_locations: indices of peaks detected for this spectrum
     :param fill_value: The fill value which indicates the spectrum is below noise floor
     :return: left_edges: list of indices of left edges,
@@ -420,7 +420,7 @@ def average_single_bin(specdata_values, B, bin):
 def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     """
     Function called by average_smooth_detect
-    :param spec_data: list of xarray data sets containing spectra
+    :param spec_data: list of xarray data sets containing spectra (linear units)
     :param t_avg: integer
     :param h_avg: integer
     :param kwargs: 'verbosity'
@@ -462,7 +462,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
     degree 2; lowess means polynomial is degree 1.
     :param averaged_spectra: list of Datasets of spectra, linear units
     :param spec_data:
-    :param span: span used for loess/ lowess smoothing
+    :param span: span (m/s) used for loess/ lowess smoothing
     :param kwargs: 'verbosity'
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
@@ -474,8 +474,12 @@ def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
         for c in range(len(averaged_spectra[f].chirp)):
             r_ind = [int(i) for i in [0] + list(spec_data[f].rg_offsets.values)][c:c+2]
             velbins = spec_data[f]['velocity_vectors'].values[c, :]
-            window_length = round_to_odd(span * len(velbins))
-            if method == 'loess':
+            window_length = round_to_odd(span / (velbins[1]-velbins[0]))
+            print(f'chirp {c+1}, window length {window_length}, for span = {span}') if \
+                'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+            if window_length == 1:
+                pass
+            elif method == 'loess':
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
                     averaged_spectra[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :], window_length,
                     polyorder=2, axis=2, mode='nearest')
@@ -664,68 +668,101 @@ class Peako(object):
         for f in range(len(self.training_data)):
             list_out.append(xr.DataArray(~(self.training_data[f]['peaks'].values[:, :, 0] == self.fill_value)*1,
                                           dims=['range', 'time']))
-        if not self.k_fold_cv:
+        if not self.k_fold_cv and self.num_training_samples is None:
             self.marked_peaks_index = list_out
         else:
             return list_out
 
     def train_peako(self):
-        if not self.k_fold_cv:
+        """
+        training peako: If k is set to a value > 0, split the training data using KFold
+        :return:
+        """
+        if not self.k_fold_cv and self.num_training_samples is None:
+            # no k-fold cv and no cropping of training samples
             # locate the spectra that were marked by hand
             self.create_training_mask()
             result = self.train_peako_inner()
             return result
         else:
-            result_list_out = []
-            from sklearn.model_selection import KFold
-            # split the training data into k subsets and use one as a testing set
+            # either k is set, or training samples should be cropped, or both
+            # return the training mask and modify it first before training is performed
             training_mask = self.create_training_mask()
             empty_training_mask = copy.deepcopy(training_mask)
             for i1 in range(len(empty_training_mask)):
                 empty_training_mask[i1].values[:, :] = 0
 
             training_index = [np.where(training_mask[f] == 1)
-                      for f in range(len(training_mask))]
-
+                              for f in range(len(training_mask))]
 
             list_of_lengths = [len(i[0]) for i in training_index]
             num_marked_spectra = np.sum(list_of_lengths)
-            cv = KFold(n_splits=self.k, random_state=42, shuffle=True)
-            self.current_k = 0
-            for index_training, index_testing in cv.split(range(num_marked_spectra)):
+
+            if not self.k_fold_cv and self.num_training_samples is not None:
+                # k is not set, but we have to crop the number of training samples
+                index_training = np.random.randint(0, num_marked_spectra, size=self.num_training_samples)
                 this_training_mask = copy.deepcopy(empty_training_mask)
-                this_testing_mask = copy.deepcopy(empty_training_mask)
-
-                # crop index_training to the number of training samples if supplied
-                if self.num_training_samples != None:
-                    index_training = index_training[np.random.randint(0, len(index_training),
-                                                                      size=self.num_training_samples)]
-
-                if self.verbosity > 0:
-                    print("k: ", self.current_k, "\n")
-                    print("Train Index: ", index_training, "\n")
-                    print("Test Index: ", index_testing)
                 for f in range(len(index_training)):
                     i_1, left_bound = find_index_in_sublist(index_training[f], training_index)
                     this_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
-                                                        training_index[i_1][1][index_training[f]-left_bound]] = 1
-                    # possibly missing a +/- 1 here
+                                                            training_index[i_1][1][index_training[f]-left_bound]] = 1
                 self.marked_peaks_index = this_training_mask
                 result = self.train_peako_inner()
-                result_list_out.append(result)
-                # TODO actually use the testing set index
-                # maximum possible similarity
-                for f in range(len(index_testing)):
-                    i_1, left_bound = find_index_in_sublist(index_testing[f], training_index)
-                    this_testing_mask[i_1].values[training_index[i_1][0][index_testing[f]-left_bound],
-                                                        training_index[i_1][1][index_testing[f]-left_bound]] = 1
+                return result
 
-                self.marked_peaks_index = this_testing_mask
+            else:
+                # k is set, the result becomes a list
+                result_list_out = []
+                from sklearn.model_selection import KFold
+                # split the training data into k subsets and use one as a testing set
 
-                self.current_k += 1
+                cv = KFold(n_splits=self.k, random_state=42, shuffle=True)
+                self.current_k = 0
+                for index_training, index_testing in cv.split(range(num_marked_spectra)):
+                    this_training_mask = copy.deepcopy(empty_training_mask)
+                    this_testing_mask = copy.deepcopy(empty_training_mask)
 
-            self.marked_peaks_index = training_mask
-            return result_list_out
+                    # crop index_training to the number of training samples if supplied
+                    if self.num_training_samples != None:
+                        index_training = index_training[np.random.randint(0, len(index_training),
+                                                                          size=self.num_training_samples)]
+
+                    if self.verbosity > 0:
+                        print("k: ", self.current_k, "\n")
+                        print("Train Index: ", index_training, "\n")
+                        print("Test Index: ", index_testing)
+
+                    for f in range(len(index_training)):
+                        i_1, left_bound = find_index_in_sublist(index_training[f], training_index)
+                        this_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
+                                                            training_index[i_1][1][index_training[f]-left_bound]] = 1
+                    # possibly missing a +/- 1 here
+                    self.marked_peaks_index = this_training_mask
+                    result = self.train_peako_inner()
+
+                    for f in range(len(index_testing)):
+                        i_1, left_bound = find_index_in_sublist(index_testing[f], training_index)
+                        this_testing_mask[i_1].values[training_index[i_1][0][index_testing[f]-left_bound],
+                                                            training_index[i_1][1][index_testing[f]-left_bound]] = 1
+
+                    self.marked_peaks_index = this_testing_mask
+
+                    max_sim = self.compute_maximum_similarity()
+                    testing_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=result['t_avg'],
+                                                          h_avg=result['h_avg'], span=result['span'],
+                                                          width=result['width'], prom=result['prom'],
+                                                          smoothing_method=self.smoothing_method,
+                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
+                                                          marked_peaks_index=self.marked_peaks_index,
+                                                          procs=self.procs, verbosity=self.verbosity)
+                    # compute the similarity
+                    similarity = self.area_peaks_similarity(testing_peaks, array_out=False)
+                    result['testing_result'] = {'similarity': similarity, 'maximum similarity': max_sim}
+                    result_list_out.append(result)
+                    self.current_k += 1
+
+                self.marked_peaks_index = training_mask
+                return result_list_out
 
     def train_peako_inner(self):
         """
