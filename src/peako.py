@@ -541,6 +541,7 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
                 func = partial(peak_detection_multiprocessing, spectra[f]['doppler_spectrum'].data[:, r_ind[0]: r_ind[1],
                                                                  :], prom, fill_value, width_thresh, max_peaks)
                 res = pn.map(func, iterable)
+                pn.close()
                 for i, j in enumerate(res):
                     t, h = iterable[i]
                     peaks_array['PeakoPeaks'].data[t, r_ind[0] + h, 0:len(j)] = j
