@@ -411,9 +411,13 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
     return peaks
 
 
-def average_single_bin(specdata_values, B, bin):
-    A = specdata_values[:, :, bin]
-    C = scipy.signal.convolve2d(A, B, 'same')
+def average_single_bin(specdata_values, B, bin, range_offsets):
+    C = []
+    r_ind = [int(i) for i in [0] + list(range_offsets)]
+    for c in range(len(r_ind) - 1):
+        A = specdata_values[:, r_ind[c]:r_ind[c+1], bin]
+        C.append(scipy.signal.convolve2d(A, B, 'same'))
+    C = np.hstack(C)
     return C
 
 
@@ -441,14 +445,15 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
 #                array_out = np.swapaxes(np.array(res), 0, 2)
 #                array_out = array_out.swapaxes(0, 1)
 #                avg_specs[var_string][:, :, :] = array_out
-            for c in range(len(spec_data[f].chirp)):
-                r_ind = [int(i) for i in [0] + list(spec_data[f].rg_offsets.values)][c:c+2]
-                for d in range(avg_specs['doppler_spectrum'].values.shape[2]):
+            #for c in range(len(spec_data[f].chirp)):
+            #    r_ind = [int(i) for i in [0] + list(spec_data[f].rg_offsets.values)][c:c+2]
+            range_offsets = spec_data[f].rg_offsets.values
+            for d in range(avg_specs['doppler_spectrum'].values.shape[2]):
 
-                    #A = spec_data[f]['doppler_spectrum'].data[:, r_ind[0]:r_ind[1], d]
-                    #one_bin_avg = scipy.signal.convolve2d(A, B, 'same')
-                    one_bin_avg = average_single_bin(spec_data[f]['doppler_spectrum'].data, B, d)
-                    avg_specs['doppler_spectrum'][:, r_ind[0]:r_ind[1], d] = one_bin_avg
+                #A = spec_data[f]['doppler_spectrum'].data[:, r_ind[0]:r_ind[1], d]
+                #one_bin_avg = scipy.signal.convolve2d(A, B, 'same')
+                one_bin_avg = average_single_bin(spec_data[f]['doppler_spectrum'].data, B, d, range_offsets)
+                avg_specs['doppler_spectrum'][:, :, d] = one_bin_avg
 
         avg_specs_list.append(avg_specs)
 
@@ -821,11 +826,18 @@ class Peako(object):
                       (np.log10(min(self.training_params['span'])), np.log10(max(self.training_params['span']))),
                       (min(self.training_params['width']), max(self.training_params['width'])),
                       (min(self.training_params['prom']), max(self.training_params['prom']))]
-            result = differential_evolution(self.fun_to_minimize, bounds=bounds)
+            result_de = differential_evolution(self.fun_to_minimize, bounds=bounds)
 
             # remove the first line from the training result
             self.training_result['scipy'][self.current_k] = np.delete(self.training_result['scipy'][self.current_k], 0,
                                                                       axis=0)
+            # create dictionary
+            result = {'t_avg': result_de['x'][0],
+                    'h_avg': int(result_de['x'][1]),
+                    'span': result_de['x'][2],
+                    'width': result_de['x'][3],
+                    'prom': result_de['x'][4],
+                    'similarity': result_de['x'][5]}
             return result
 
     def fun_to_minimize(self, parameters):
