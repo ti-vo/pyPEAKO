@@ -650,7 +650,7 @@ class Peako(object):
         self.num_training_samples = num_training_samples
         self.fill_value = self.spec_data[0]._FillValue
         self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
-            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.005, 0.02, 0.005),
+            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.2, 0.05),
              'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
         self.training_result = {'loop': [np.empty((1, 6))], 'scipy': [np.empty((1, 6))]} if not self.k_fold_cv else {
             'loop': [np.empty((1, 6))]*self.k, 'scipy': [np.empty((1, 6))]*self.k}
@@ -660,8 +660,11 @@ class Peako(object):
         self.testing_data = []
         self.specfiles_test = []
         self.spec_data_test = []
-        self.plot_dir = kwargs['plot_dir'] if 'plot_dir' in kwargs else ''
         self.verbosity = verbosity
+        self.plot_dir = kwargs['plot_dir'] if 'plot_dir' in kwargs else ''
+        if 'plot_dir' in kwargs and not os.path.exists(self.plot_dir):
+            os.mkdir(self.plot_dir)
+            print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
         self.procs = kwargs['procs'] if 'procs' in kwargs else 5
 
     def create_training_mask(self):
