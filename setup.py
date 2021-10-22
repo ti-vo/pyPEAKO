@@ -16,7 +16,7 @@ setup(
     url='https://github.com/ti-vo/pyPEAKO',
     license='MIT',
     package_dir={'': 'src'},
-    py_modules=['peako'], #find_packages(exclude=['docs', 'tests', 'playground']),
+    py_modules=['pypeako'], #find_packages(exclude=['docs', 'tests', 'playground']),
 #    package_data={'pyPEAKO': ['../examples/sample_spectra.nc', '../examples/marked_peaks_sample_spectra.nc']},
 #    include_package_data=True,
     python_requires='>=3.6',
