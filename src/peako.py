@@ -11,8 +11,6 @@ from scipy.optimize import differential_evolution, dual_annealing
 import random
 import matplotlib
 import matplotlib.pyplot as plt
-from multiprocessing import Pool
-from functools import partial
 
 # TODO specify directory for plots and write some pdfs out with nice naming
 
@@ -413,7 +411,7 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
     :param smoothing_method: defaults to loess smoothing
     :param max_peaks: maximum number of peaks which can be detected. Defaults to 5
     :param fill_value: defaults to -999.0
-    :param kwargs: 'marked_peaks_index', 'procs', 'verbosity'
+    :param kwargs: 'marked_peaks_index', 'verbosity'
     :return: peaks: The detected peaks (list of datasets)
     """
     avg_spec = average_spectra(spec_data, t_avg, h_avg, **kwargs)
@@ -524,10 +522,8 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
     """
     print('detecting...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
     peaks = []
-    procs = kwargs['procs'] if 'procs' in kwargs else 5
     for f in range(len(spectra)):
         peaks_dataset = xr.Dataset()
-        # create an xarray dataset and add one empty data array to it
         peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
             (spectra[f]['doppler_spectrum'].values.shape[0:2] +
              (max_peaks,)), np.nan, dtype=np.int),
@@ -535,7 +531,6 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
             coords=[spectra[f]['time'], spectra[f]['range'],
                     xr.DataArray(range(max_peaks))])})
         for c in range(len(spectra[f].chirp)):
-            # convert width_thresh units from m/s to # of Doppler bins:
             width_thresh = width_thresh/np.nanmedian(np.diff(spec_data[f]['velocity_vectors'].values[c, :]))
 
             r_ind = np.hstack(
@@ -552,17 +547,15 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
                                                        "marked_peaks_index as key word argument"
                 marked_peaks_index = kwargs['marked_peaks_index']
                 t_ind, h_ind = np.where(marked_peaks_index[f][:, r_ind[0]: r_ind[1]] == 1)
-
-                # loop over height-time combinations where spectra were marked
-                iterable = [[t, h] for t, h in zip(t_ind, h_ind)]
-                pn = Pool(processes=procs)
-                func = partial(peak_detection_multiprocessing, spectra[f]['doppler_spectrum'].data[:, r_ind[0]: r_ind[1],
-                                                                 :], prom, fill_value, width_thresh, max_peaks)
-                res = pn.map(func, iterable)
-                pn.close()
-                for i, j in enumerate(res):
-                    t, h = iterable[i]
-                    peaks_array['PeakoPeaks'].data[t, r_ind[0] + h, 0:len(j)] = j
+                h_ind += r_ind[0]
+                if len(h_ind) > 0:
+                    peaks_marked_spectra = xr.apply_ufunc(peak_detection_dask,
+                                                          spectra[f].doppler_spectrum.isel(time=xr.DataArray(t_ind),
+                                                                    range=xr.DataArray(h_ind)).values[np.newaxis, :, :],
+                                                          prom, fill_value, width_thresh, max_peaks)
+                    for i, j in enumerate(zip(t_ind, h_ind)):
+                        t, h = j
+                        peaks_array['PeakoPeaks'].data[t, h, :] = peaks_marked_spectra[0, i, 0:max_peaks]
 
         # update the dataset (add the peaks_array dataset)
         peaks_dataset.update(other=peaks_array)
@@ -643,7 +636,7 @@ class Peako(object):
          used for training.
         :param verbosity: level of how much detail is printed into the console (debugging info)
         :param kwargs 'training_params' = dictionary containing 't_avg', 'h_avg', 'span', 'width' and 'prom' values over
-        which to loop if optimization_method is set to 'loop'. 'procs': number of processes to use (multiprocessing
+        which to loop if optimization_method is set to 'loop'.
         library)
         """
         self.training_files = training_data
@@ -677,7 +670,6 @@ class Peako(object):
         if 'plot_dir' in kwargs and not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
             print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
-        self.procs = kwargs['procs'] if 'procs' in kwargs else 5
 
     def create_training_mask(self):
         """
@@ -774,7 +766,7 @@ class Peako(object):
                                                           smoothing_method=self.smoothing_method,
                                                           max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                           marked_peaks_index=self.marked_peaks_index,
-                                                          procs=self.procs, verbosity=self.verbosity)
+                                                          verbosity=self.verbosity)
                     # compute the similarity
                     similarity = self.area_peaks_similarity(testing_peaks, array_out=False)
                     result['testing_result'] = {'similarity': similarity, 'maximum similarity': max_sim}
@@ -810,7 +802,7 @@ class Peako(object):
                                                                     max_peaks=self.max_peaks,
                                                                     fill_value=self.fill_value,
                                                                     marked_peaks_index=self.marked_peaks_index,
-                                                                    procs=self.procs, verbosity=self.verbosity)
+                                                                    verbosity=self.verbosity)
                                 similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
                                 self.training_result['loop'][self.current_k] = np.append(self.training_result['loop'][
@@ -876,7 +868,7 @@ class Peako(object):
         peako_peaks = average_smooth_detect(self.spec_data, t_avg=t_avg, h_avg=h_avg, span=span, width=width, prom=prom,
                                             smoothing_method=self.smoothing_method, max_peaks=self.max_peaks,
                                             fill_value=self.fill_value, marked_peaks_index=self.marked_peaks_index,
-                                            procs=self.procs, verbosity=self.verbosity)
+                                            verbosity=self.verbosity)
         # compute the similarity
         res = self.area_peaks_similarity(peako_peaks, array_out=False)
 
@@ -982,8 +974,7 @@ class Peako(object):
                                                                                 all_spectra=True,
                                                                                 smoothing_method=self.smoothing_method,
                                                                                 max_peaks=self.max_peaks,
-                                                                                fill_value=self.fill_value,
-                                                                                procs=self.procs)
+                                                                                fill_value=self.fill_value)
 
                     # or if the shape of the training data does not match the shape of the stored found peaks
                     elif self.peako_peaks_training[j][k][0]['PeakoPeaks'].values.shape[:2] != \
@@ -995,7 +986,7 @@ class Peako(object):
                                                                                 smoothing_method=self.smoothing_method,
                                                                                 max_peaks=self.max_peaks,
                                                                                 fill_value=self.fill_value,
-                                                                                all_spectra=True, procs=self.procs)
+                                                                                all_spectra=True)
 
     def training_stats(self, make_3d_plots=False, **kwargs):
         """
@@ -1218,7 +1209,7 @@ class Peako(object):
             algorithm_peaks = {'manual': average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
                                                                width=w, prom=p, smoothing_method=self.smoothing_method,
                                                                fill_value=self.fill_value, max_peaks=self.max_peaks,
-                                                               all_spectra=True, procs=self.procs)}
+                                                               all_spectra=True)}
             self.create_training_mask()
             user_peaks = self.training_data
         # plot number of peako peaks for each of the training files and each of the optimization methods,
