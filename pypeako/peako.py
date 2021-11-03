@@ -349,11 +349,19 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
     return peaks
 
 
-def average_single_bin(specdata_values, B, bin, range_offsets):
+def average_single_bin(specdata_values: np.array, B: np.array, doppler_bin: int, range_offsets: list):
+    """
+
+    :param specdata_values: Doppler spectra nd array
+    :param B: second input for scipy.signal.convolve2d
+    :param doppler_bin: the Doppler bin for which averaging is performed
+    :param range_offsets: list of range offsets at which to split the Doppler spectra (no averaging over chirps)
+    :return:
+    """
     C = []
     r_ind = np.hstack((range_offsets, specdata_values.shape[1]))
     for c in range(len(r_ind) - 1):
-        A = specdata_values[:, r_ind[c]:r_ind[c+1], bin]
+        A = specdata_values[:, r_ind[c]:r_ind[c+1], doppler_bin]
         C.append(scipy.signal.convolve2d(A, B, 'same'))
     C = np.hstack(C)
     return C
@@ -522,12 +530,12 @@ def detect_single_spectrum(spectrum, prom, fill_value, width_thresh, max_peaks):
 
     # call scipy.signal.find_peaks to detect peaks in the (logarithmic) spectrum
     # it is important that nan values are not included in the spectrum passed to si
-    locs, props = si.find_peaks(spectrum, prominence=prom)
+    locs, props = si.find_peaks(spectrum, prominence=prom, width=width_thresh)
     # find left and right edges of peaks
-    le, re = find_edges(spectrum, fill_value, locs)
+    #le, re = find_edges(spectrum, fill_value, locs)
     # compute the width
-    width = peak_width(spectrum, locs, le, re)
-    locs = locs[width > width_thresh]
+    #width = peak_width(spectrum, locs, le, re)
+    #locs = locs[width > width_thresh]
     locs = locs[0: max_peaks] if len(locs) > max_peaks else locs
     # TODO
     #  Murks : artificially create output dimension of same length as Doppler bins to avoid xarray value error
@@ -1029,12 +1037,18 @@ class Peako(object):
         k = kwargs['k'] if 'k' in kwargs else 0
 
         # select a random user-marked spectrum
-        f = random.randint(0, len(self.marked_peaks_index) - 1)
-        # this can be problematic if there are no marked spectra for one of the chirps...
-        t_ind, h_ind = np.where(self.marked_peaks_index[f] == 1)
+        h_ind = []
+        f_try = 0
+        while len(h_ind) == 0 and f_try < 10:
+            f = random.randint(0, len(self.marked_peaks_index) - 1)
+            f_try += 1
+            t_ind, h_ind = np.where(self.marked_peaks_index[f] == 1)
+        if len(h_ind) == 0:
+            print('no user-marked spectra found') if self.verbosity > 0 else None
+            return None, None
 
         i = random.randint(0, len(h_ind) - 1)
-        c = np.digitize(h_ind[i], [0] + list(self.spec_data[f].chirp_start_indices.values))
+        c = np.digitize(h_ind[i], utils.get_chirp_offsets(self.spec_data[f]))
         velbins = self.spec_data[f]['velocity_vectors'].values[c-1, :]
         spectrum = self.spec_data[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
         user_ind = utils.vel_to_ind(self.training_data[f]['peaks'].values[t_ind[i], h_ind[i], :], velbins=velbins,
@@ -1140,10 +1154,10 @@ class Peako(object):
         elif mode == 'manual':
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
             t, h, s, w, p = kwargs['peako_params']
-            algorithm_peaks = {'manual': average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
+            algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
                                                                width=w, prom=p, smoothing_method=self.smoothing_method,
                                                                fill_value=self.fill_value, max_peaks=self.max_peaks,
-                                                               all_spectra=True)}
+                                                               all_spectra=True)]}
             self.create_training_mask()
             user_peaks = self.training_data
         # plot number of peako peaks for each of the training files and each of the optimization methods,
