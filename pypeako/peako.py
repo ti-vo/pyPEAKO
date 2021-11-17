@@ -12,6 +12,7 @@ import random
 import matplotlib
 import matplotlib.pyplot as plt
 from pypeako import utils
+from sklearn.model_selection import KFold
 
 # TODO specify directory for plots and write some pdfs out with nice naming
 
@@ -308,20 +309,6 @@ def plot_spectrum_peako_peaks(peaks_dataset, spec_dataset, height, time, key='Pe
     return fig, ax
 
 
-def find_index_in_sublist(index, training_index):
-    """
-    :param index:
-    :param training_index:
-    :return:
-    """
-    # TODO check if this is still needed
-    list_of_lengths = [len(i[0]) for i in training_index]
-    b = np.cumsum(np.array(list_of_lengths))
-    list_of_lengths_2 = list(range(len(list_of_lengths)))
-    c = np.digitize(index, b)
-    ind = np.where(np.array(list_of_lengths_2) == c)[0]
-    left_bound = 0 if c == 0 else b[c-1]
-    return int(ind), left_bound
 
 
 def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectra=False, smoothing_method='loess',
@@ -369,7 +356,7 @@ def average_single_bin(specdata_values: np.array, B: np.array, doppler_bin: int,
 
 def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     """
-    Function called by average_smooth_detect
+    Function to time-height average Doppler spectra
     :param spec_data: list of xarray data sets containing spectra (linear units)
     :param t_avg: integer
     :param h_avg: integer
@@ -383,11 +370,9 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
         avg_specs = xr.Dataset({'doppler_spectrum': xr.DataArray(np.zeros(spec_data[f].doppler_spectrum.shape),
                                                                  dims=['time', 'range', 'spectrum'],
                                                                  coords={'time': spec_data[f].time,
-                                                                         'range': spec_data[f].range,
+                                                                         'range': spec_data[f].range_layers,
                                                                          'spectrum': spec_data[f].spectrum}),
                                 'chirp': spec_data[f].chirp})
-
-        #avg_specs = spec_data[f].where(spec_data[f].time < 0).load()  # create empty xr data set
 
         if t_avg == 0 and h_avg == 0:
             avg_specs['doppler_spectrum'][:, :, :] = spec_data[f]['doppler_spectrum'].values[:, :, :]
@@ -545,23 +530,20 @@ def detect_single_spectrum(spectrum, prom, fill_value, width_thresh, max_peaks):
 
 
 class Peako(object):
-    def __init__(self, training_data=[], peak_detection='peako', optimization_method='loop',
+    def __init__(self, training_data=[], optimization_method='loop',
                  smoothing_method='loess', max_peaks=5, k=0, num_training_samples=None, verbosity=0, **kwargs):
 
         """
         initialize a Peako object
-        :param training_data: list of strings (netcdf files to read in written by mark_peaks module,
+        :param training_data: list of strings (netcdf files to read in written by TrainingData.save_training_data,
         filenames starting with marked_peaks_...)
-        :param peak_detection: method for peak detection. Only option right now is 'peako'; later 'peakTree' option
-        is to be added. Default is 'peako'.
         :param optimization_method: Either 'loop' or 'DE'. In case of 'loop' looping over different parameter
         combinations is performed in a brute-like way. Option 'DE' uses differential evolution toolkit to find
-        optimal solution. Default is 'loop'.
-        :param smoothing_method: method for smoothing Doppler spectra. Options are 'loess', 'lowess' (both included
-        in scipy.signal). The plan is to also add peakTree smoothing using convolution with a defined window function.
-        The default is 'loess' smoothing.
-        :param max_peaks: maximum number of peaks to be detected by the algorithm. Defaults to 5.
-        :param k: integer specifying parameter k in k-fold cross-validation. If it's set to 0 (the default), the
+        optimal solution (expensive). Default is 'loop'.
+        :param smoothing_method: string specifying the method for smoothing spectra. Options are 'loess', 'lowess' (from
+        in scipy.signal). The default is 'loess' smoothing.
+        :param max_peaks: integer, maximum number of peaks to be detected by the algorithm. Defaults to 5.
+        :param k: integer specifying parameter "k" in k-fold cross-validation. If it's set to 0 (the default), the
         training data is not split. If it's different from 0, training data is split into k subsets (folds), where
         each fold will be used as the test set one time.
         :param num_training_samples: Number of spectra to be used for training. Default is None, i.e. all spectra are
@@ -575,27 +557,28 @@ class Peako(object):
         self.training_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in training_data]
         self.specfiles = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
         self.spec_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in self.specfiles]
-        self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = [s.load() for s in self.spec_data]
-        self.peak_detection_method = peak_detection
+        self.spec_data = utils.mask_velocity_vectors(self.spec_data)
+        self.spec_data = utils.mask_fill_values(self.spec_data)
         self.optimization_method = optimization_method
         self.smoothing_method = smoothing_method
         self.marked_peaks_index = []
         self.max_peaks = max_peaks
-        self.k = k+1
+        self.k = k
         self.current_k = 0
         self.k_fold_cv = False if k == 0 else True
         self.num_training_samples = num_training_samples
-        self.fill_value = self.spec_data[0]._FillValue if "_FillValue" in self.spec_data[0].attrs else np.nan
+        self.fill_value = np.nan
         self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
             {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.2, 0.05),
              'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
         self.training_result = {'loop': [np.empty((1, 6))], 'DE': [np.empty((1, 6))]} if not self.k_fold_cv else {
             'loop': [np.empty((1, 6))]*self.k, 'DE': [np.empty((1, 6))]*self.k}
-        self.peako_peaks_training = {'loop': [[] for _ in range(self.k)], 'DE': [[] for _ in range(self.k)]}
+        self.peako_peaks_training = {'loop': [[] for _ in range(self.k+1)], 'DE': [[] for _ in range(self.k+1)]}
         self.peako_peaks_testing = {'loop': [], 'DE': []}
         self.testing_files = []
         self.testing_data = []
+        self.marked_peaks_index_testing = []
         self.specfiles_test = []
         self.spec_data_test = []
         self.verbosity = verbosity
@@ -610,7 +593,14 @@ class Peako(object):
         user-marked peaks. Store this mask in Peako.marked_peaks_index.
         """
         self.marked_peaks_index = []
+        self.marked_peaks_index_testing = []
+        list_testing = []
         list_out = []
+        for e in range(len(self.testing_data)):
+            list_testing.append(xr.DataArray(~np.isnan(self.testing_data[e]['peaks'].values[:, :, 0])*1,
+                                          dims=['time', 'range']))
+        self.marked_peaks_index_testing = list_testing
+
         for f in range(len(self.training_data)):
             list_out.append(xr.DataArray(~np.isnan(self.training_data[f]['peaks'].values[:, :, 0])*1,
                                           dims=['time', 'range']))
@@ -649,7 +639,6 @@ class Peako(object):
                 empty_training_mask[i1].values[:, :] = 0
 
             training_index = [np.where(training_mask[f] == 1) for f in range(len(training_mask))]
-
             list_of_lengths = [len(i[0]) for i in training_index]
             num_marked_spectra = np.sum(list_of_lengths)
 
@@ -658,7 +647,7 @@ class Peako(object):
                 index_training = np.random.randint(0, num_marked_spectra, size=self.num_training_samples)
                 this_training_mask = copy.deepcopy(empty_training_mask)
                 for f in range(len(index_training)):
-                    i_1, left_bound = find_index_in_sublist(index_training[f], training_index)
+                    i_1, left_bound = utils.find_index_in_sublist(index_training[f], training_index)
                     this_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
                                                             training_index[i_1][1][index_training[f]-left_bound]] = 1
                 self.marked_peaks_index = this_training_mask
@@ -668,7 +657,6 @@ class Peako(object):
             else:
                 # k is set, the result becomes a list
                 result_list_out = []
-                from sklearn.model_selection import KFold
                 # split the training data into k subsets and use one as a testing set
 
                 cv = KFold(n_splits=self.k, random_state=42, shuffle=True)
@@ -688,15 +676,14 @@ class Peako(object):
                         print("Test Index: ", index_testing)
 
                     for f in range(len(index_training)):
-                        i_1, left_bound = find_index_in_sublist(index_training[f], training_index)
+                        i_1, left_bound = utils.find_index_in_sublist(index_training[f], training_index)
                         this_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
                                                             training_index[i_1][1][index_training[f]-left_bound]] = 1
-                    # possibly missing a +/- 1 here
                     self.marked_peaks_index = this_training_mask
                     result = self.train_peako_inner()
 
                     for f in range(len(index_testing)):
-                        i_1, left_bound = find_index_in_sublist(index_testing[f], training_index)
+                        i_1, left_bound = utils.find_index_in_sublist(index_testing[f], training_index)
                         this_testing_mask[i_1].values[training_index[i_1][0][index_testing[f]-left_bound],
                                                             training_index[i_1][1][index_testing[f]-left_bound]] = 1
 
@@ -728,24 +715,22 @@ class Peako(object):
 
         """
 
-        # if optimization method is set to "loop", loop over possible parameter combinations:
         if self.optimization_method == 'loop':
             similarity_array = np.full([len(self.training_params[key]) for key in self.training_params.keys()], np.nan)
             for i, t_avg in enumerate(self.training_params['t_avg']):
                 for j, h_avg in enumerate(self.training_params['h_avg']):
+                    avg_spec = average_spectra(self.spec_data, t_avg=t_avg, h_avg=h_avg)
                     for k, span in enumerate(self.training_params['span']):
+                        smoothed_spectra = smooth_spectra(avg_spec, self.spec_data, span=span, method=self.smoothing_method)
                         for l, wth in enumerate(self.training_params['width']):
                             for m, prom in enumerate(self.training_params['prom']):
                                 if self.verbosity > 0:
                                     print(f'finding peaks for t={t_avg}, h={h_avg}, span={span}, width={wth}, '
                                           f'prom={prom}')
-                                peako_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=t_avg, h_avg=h_avg,
-                                                                    span=span, width=wth, prom=prom,
-                                                                    smoothing_method=self.smoothing_method,
-                                                                    max_peaks=self.max_peaks,
-                                                                    fill_value=self.fill_value,
-                                                                    marked_peaks_index=self.marked_peaks_index,
-                                                                    verbosity=self.verbosity)
+                                peako_peaks = get_peaks(smoothed_spectra, self.spec_data, prom, wth,
+                                                        max_peaks=self.max_peaks, fill_value=self.fill_value,
+                                                        verbosity=self.verbosity,
+                                                        marked_peaks_index=self.marked_peaks_index)
                                 similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
                                 self.training_result['loop'][self.current_k] = np.append(self.training_result['loop'][
@@ -775,7 +760,7 @@ class Peako(object):
                       (min(self.training_params['width']), max(self.training_params['width'])),
                       (min(self.training_params['prom']), max(self.training_params['prom']))]
             disp = True if self.verbosity > 0 else False
-            result_de = differential_evolution(self.fun_to_minimize, bounds=bounds, disp=disp, workers=5)
+            result_de = differential_evolution(self.fun_to_minimize, bounds=bounds, disp=disp, workers=8)
 
             # remove the first line from the training result
             self.training_result['DE'][self.current_k] = np.delete(self.training_result['DE'][self.current_k], 0,
@@ -818,10 +803,9 @@ class Peako(object):
         self.training_result['DE'][self.current_k] = np.append(self.training_result['DE'][self.current_k],
                                                                   [[t_avg, h_avg, span, width, prom, res]], axis=0)
 
-        # for scipy optimization, return negative similarity:
         return -res
 
-    def area_peaks_similarity(self, algorithm_peaks: np.array, array_out=False):
+    def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
             peaks in a radar Doppler spectrum
 
@@ -831,21 +815,31 @@ class Peako(object):
             of all the hand-marked spectra is returned. Default is False.
 
         """
+        if mode == 'training':
+            specfiles = self.specfiles
+            t_data = self.training_data
+            s_data = self.spec_data
+            marked_peaks = self.marked_peaks_index
+        elif mode == 'testing':
+            specfiles = self.specfiles_test
+            t_data = self.testing_data
+            s_data = self.spec_data_test
+            marked_peaks = self.marked_peaks_index_testing
         sim_out = [] if array_out else 0
         print('computing similarity...') if self.verbosity > 0 else None
         # loop over files and chirps, and then over the spectra which were marked by hand
-        for f in range(len(self.specfiles)):
+        for f in range(len(specfiles)):
             bins_per_chirp = np.diff(np.hstack(
-                (self.spec_data[f].chirp_start_indices.values, self.spec_data[f].n_range_layers.values)))
-            velbins_per_bin = (np.repeat(self.spec_data[f]['velocity_vectors'].values,
+                (s_data[f].chirp_start_indices.values, s_data[f].n_range_layers.values)))
+            velbins_per_bin = (np.repeat(s_data[f]['velocity_vectors'].values,
                                          [int(b) for b in bins_per_chirp], axis=0))
-            t_ind, h_ind = np.where(self.marked_peaks_index[f] == 1)
+            t_ind, h_ind = np.where(marked_peaks[f] == 1)
             for h, t in zip(h_ind, t_ind):
-                user_peaks = self.training_data[f]['peaks'].values[t, h, :]
+                user_peaks = t_data[f]['peaks'].values[t, h, :]
                 user_peaks = user_peaks[~np.isnan(user_peaks)]
                 # convert velocities to indices
                 user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
-                spectrum = self.spec_data[f]['doppler_spectrum'].values[t, h, :]
+                spectrum = s_data[f]['doppler_spectrum'].values[t, h, :]
                 spectrum_db = utils.lin2z(spectrum).filled(0.0)
                 spectrum_db[spectrum == self.fill_value] = 0.0
                 user_peaks.sort()
@@ -957,27 +951,65 @@ class Peako(object):
                         fig.savefig(self.plot_dir + f'3d_plot_{j}_k{k}.png')
         return maximum_similarity
 
-    def compute_maximum_similarity(self):
+    def testing_stats(self, **kwargs):
+        """
+        print out test statistics
+         """
+
+        self.assert_training()
+        k = kwargs['k'] if 'k' in kwargs else 0
+        maximum_similarity = self.compute_maximum_similarity(mode='testing')
+        for j in self.training_result.keys():
+            if self.training_result[j][k].shape[0] > 1:
+                print(f'{j}, k={k}:')
+                h, t, s, w, p = self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1]
+                peako_peaks_test = average_smooth_detect(spec_data=self.spec_data_test, t_avg=t,
+                                                          h_avg=h, span=s,
+                                                          width=w, prom=p,
+                                                          smoothing_method=self.smoothing_method,
+                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
+                                                          all_spectra=True,
+                                                          #marked_peaks_index=self.marked_peaks_index_testing,
+                                                          verbosity=self.verbosity)
+                self.peako_peaks_testing[j].append(peako_peaks_test)
+                catch = self.area_peaks_similarity(peako_peaks_test, mode='testing')
+                print(f'similarity is {round(catch/maximum_similarity*100,2)}% of maximum possible similarity')
+                print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, width: {0[3]}, prom: {0[4]}'.format(
+                    (self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1])))
+
+        return maximum_similarity
+
+    def compute_maximum_similarity(self, mode='training'):
+        if mode == 'training':
+            specfiles = self.specfiles
+            t_data = self.training_data
+            s_data = self.spec_data
+            marked_peaks = self.marked_peaks_index
+        elif mode == 'testing':
+            specfiles = self.specfiles_test
+            t_data = self.testing_data
+            s_data = self.spec_data_test
+            marked_peaks = self.marked_peaks_index_testing
         # compute maximum possible similarity for the user marked peaks in self.marked_peaks_index
         user_peaks = []
-        for f in range(len(self.specfiles)):
+        for f in range(len(specfiles)):
             peaks_dataset = xr.Dataset()
             peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
-                self.training_data[f]['peaks'].values.shape,
+                t_data[f]['peaks'].values.shape,
                 np.nan, dtype=np.int), dims=['time', 'range', 'peaks'])})
-            for c in range(len(self.training_data[f].chirp)):
-                velbins = self.spec_data[f]['velocity_vectors'].values[c, :]
-                r_ind = utils.get_chirp_offsets(self.spec_data[f])[c:c + 2]
+            for c in range(len(t_data[f].chirp)):
+                velbins = s_data[f]['velocity_vectors'].values[c, :]
+                r_ind = utils.get_chirp_offsets(s_data[f])[c:c + 2]
                 # convert m/s to indices (call vel_to_ind)
-                t_ind, h_ind = np.where(self.marked_peaks_index[f][:, r_ind[0]: r_ind[1]] == 1)
+                t_ind, h_ind = np.where(marked_peaks[f][:, r_ind[0]: r_ind[1]] == 1)
                 for h, t in zip(h_ind, t_ind):
-                    indices = utils.vel_to_ind(self.training_data[f]['peaks'].values[t, r_ind[0] + h, :], velbins,
+                    indices = utils.vel_to_ind(t_data[f]['peaks'].values[t, r_ind[0] + h, :], velbins,
                                          self.fill_value)
                     peaks_array['PeakoPeaks'].values[t, r_ind[0] + h, :] = indices
             peaks_dataset.update(other=peaks_array)
             user_peaks.append(peaks_dataset)
 
-        maximum_similarity = self.area_peaks_similarity(user_peaks)
+        maximum_similarity = self.area_peaks_similarity(user_peaks, mode=mode)
         return maximum_similarity
 
     def plot_3d_plots(self, key, k=0):
@@ -1119,19 +1151,8 @@ class Peako(object):
         self.testing_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in test_data]
         self.specfiles_test = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.testing_files]
         self.spec_data_test = [xr.open_dataset(fin, mask_and_scale=True) for fin in self.specfiles_test]
-
-        # TODO !!Murks!! Find better solution for this
-        # copy the Peako object and replace training data with testing data to utilize the functions using spec_data
-        q = copy.deepcopy(self)
-        q.training_files = test_data
-        q.training_data = self.testing_data
-        q.specfiles = self.specfiles_test
-        q.spec_data = self.spec_data_test
-        q.marked_peaks_index = []
-        q.create_training_mask()
-        q.training_stats()
-        q.plot_user_algorithm_spectrum(**kwargs)
-        self.peako_peaks_testing = q.peako_peaks_training
+        self.create_training_mask()
+        self.testing_stats()
 
     def plot_numpeaks_timeheight(self, mode='training', **kwargs):
         """
@@ -1355,7 +1376,7 @@ class TrainingData(object):
         """
         for i in range(len(self.training_data_out)):
             if not os.path.isfile(self.peaks_ncfiles[i]):
-                data_dict = {'time': self.spec_data[i].time, 'range': self.spec_data[i].range,
+                data_dict = {'time': self.spec_data[i].time, 'range': self.spec_data[i].range_layers,
                              'chirp': self.spec_data[i].chirp, 'peak': np.arange(self.max_peaks)}
 
                 data_dict['peaks'] = (['time', 'range', 'peak'], self.training_data_out[i])
@@ -1366,9 +1387,10 @@ class TrainingData(object):
             else:
                 with xr.open_dataset(self.peaks_ncfiles[i]) as data:
                     dataset = data.load()
-                assert(self.training_data_out[i].shape == dataset.__getitem__('peaks').shape)
+                assert(self.training_data_out[i].shape == dataset.peaks.shape)
                 mask = ~np.isnan(self.training_data_out[i])
-                dataset.__getitem__('peaks').values[mask] = self.training_data_out[i][mask]
+                dataset.peaks.values[mask] = self.training_data_out[i][mask]
+                #dataset = dataset.assign_coords({'range': self.spec_data[i].range_layers.values})
                 dataset.to_netcdf(self.peaks_ncfiles[i])
                 print(f'updated file {self.peaks_ncfiles[i]}')
 
