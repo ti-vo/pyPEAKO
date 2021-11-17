@@ -1189,8 +1189,8 @@ class Peako(object):
                     for f in range(len(algorithm_peaks[j][k])):
                         fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][k][f], key='PeakoPeaks')
                         ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f+1}')
-                    if len(self.plot_dir) > 0:
-                        fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_peako_{j}_k{k}.png')
+                        if len(self.plot_dir) > 0:
+                            fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_peako_{j}_k{k}.png')
         for f in range(len(user_peaks)):
             fig, ax = plot_timeheight_numpeaks(user_peaks[f], key='peaks')
             ax.set_title(f'{mode}, user peaks, file number {f+1}')
