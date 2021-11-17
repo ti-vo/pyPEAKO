@@ -592,8 +592,6 @@ class Peako(object):
         Find the entries in Peako.training_data that have values stored in them, i.e. the indices of spectra with
         user-marked peaks. Store this mask in Peako.marked_peaks_index.
         """
-        self.marked_peaks_index = []
-        self.marked_peaks_index_testing = []
         list_testing = []
         list_out = []
         for e in range(len(self.testing_data)):
@@ -973,7 +971,8 @@ class Peako(object):
                                                           verbosity=self.verbosity)
                 self.peako_peaks_testing[j].append(peako_peaks_test)
                 catch = self.area_peaks_similarity(peako_peaks_test, mode='testing')
-                print(f'similarity is {round(catch/maximum_similarity*100,2)}% of maximum possible similarity')
+                print(f'similarity for testing set is {round(catch/maximum_similarity*100,2)}% of maximum possible '
+                      f'similarity')
                 print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, width: {0[3]}, prom: {0[4]}'.format(
                     (self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1])))
 
@@ -1185,12 +1184,13 @@ class Peako(object):
         # and number of user-found peaks
         for j in algorithm_peaks.keys():
             # loop over the files
-            for f in range(len(algorithm_peaks[j])):
-                if len(algorithm_peaks[j][f]) > 0:
-                    fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][f][0], key='PeakoPeaks')
-                    ax.set_title(f'{mode}, optimization: {j}, file number {f+1}')
+            for k in range(len(algorithm_peaks[j])):
+                if len(algorithm_peaks[j][k]) > 0:
+                    for f in range(len(algorithm_peaks[j][k])):
+                        fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][k][f], key='PeakoPeaks')
+                        ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f+1}')
                     if len(self.plot_dir) > 0:
-                        fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_peako_{j}.png')
+                        fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_peako_{j}_k{k}.png')
         for f in range(len(user_peaks)):
             fig, ax = plot_timeheight_numpeaks(user_peaks[f], key='peaks')
             ax.set_title(f'{mode}, user peaks, file number {f+1}')
