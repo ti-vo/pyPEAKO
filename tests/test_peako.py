@@ -1,7 +1,6 @@
-import peako
+import pypeako
 import numpy as np
-
-# just some basic imports. For proper testing this needs to be improved quite a bit but for a first release this is okay
+import xarray as xr
 
 sample_spectrum = np.array([-9.99000000e+02, -9.99000000e+02, -9.99000000e+02, -9.99000000e+02,
                             -9.99000000e+02, -9.99000000e+02, -9.99000000e+02, -9.99000000e+02,
@@ -214,20 +213,36 @@ training_result = np.array([[0.00000000e+00, 0.00000000e+00,  5.00000000e-03,
                            [1.00000000e+00, 1.00000000e+00,  1.50000000e-02,
                            1.00000000e+00,  1.00000000e+00, -1.01514081e+05]])
 
+vel_vector = np.repeat(999999., len(sample_spectrum))
+vel_vector[64:192] = np.linspace(-4.5, 4.5, 128)
+
+spec_data = [xr.Dataset({'velocity_vectors': xr.DataArray(vel_vector[np.newaxis, :], dims=['chirp', 'spectrum'],
+                                                          coords={'chirp': [0], 'spectrum': np.arange(256)})})]
+
 
 def test_lin2z():
-    assert(peako.lin2z(0.001) == -30.0)
+    assert(pypeako.lin2z(0.001) == -30.0)
 
 
 def test_argnearest():
-    assert(peako.argnearest([0, 1, 2, 3, 50, 44, 43, 88], 11.2) == 3)
+    assert(pypeako.argnearest([0, 1, 2, 3, 50, 44, 43, 88], 11.2) == 3)
 
 
 def test_find_edges():
-    assert(peako.find_edges(sample_spectrum, -999, [122]) == ([92], [131]))
+    assert(pypeako.find_edges(sample_spectrum, -999, [122]) == ([92], [131]))
+
+
+def test_mask_velocity_vectors():
+    pypeako.utils.mask_velocity_vectors(spec_data)
+
+
+def test_find_index_in_sublist():
+    i, left_edge = pypeako.utils.find_index_in_sublist(4, [tuple(([1, 2, 3], [0, 0, 0])), tuple(([4, 5, 6], [1, 1, 1]))])
+    assert(i == 1)
+    assert(left_edge == 3)
 
 
 def test_training_stats():
-    P = peako.Peako()
+    P = pypeako.Peako()
     P.training_result['loop'] = training_result
     P.marked_peaks_index = [1, 2, 3, 4]
