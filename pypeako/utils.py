@@ -43,11 +43,23 @@ def argnearest(array, value):
     return i
 
 
-def mask_velocity_vectors(spec_data):
+def mask_velocity_vectors(spec_data: list):
+    """
+    Mask invalid values in velocity vectors not properly masked by xarray
+    :param spec_data: list of xarray DataSets containing Doppler spectra, and the variable velocity_vectors
+    :return:
+    """
     for i in range(len(spec_data)):
-        np.putmask(spec_data[i].velocity_vectors.values, spec_data[i].velocity_vectors.values>9000, np.nan)
+        np.putmask(spec_data[i].velocity_vectors.values, spec_data[i].velocity_vectors.values > 9000, np.nan)
     return spec_data
 
+def mask_fill_values(spec_data: list):
+
+    for i in range(len(spec_data)):
+        if "_FillValue" in spec_data[i].attrs:
+            np.putmask(spec_data[i].doppler_spectrum.values,
+                       spec_data[i].doppler_spectrum.values == spec_data._FillValue, np.nan)
+    return spec_data
 
 def get_vel_resolution(vel_bins):
     return np.nanmedian(np.diff(vel_bins))
@@ -75,3 +87,19 @@ def get_chirp_offsets(specdata):
     :return:
     """
     return np.hstack((specdata.chirp_start_indices.values, specdata.n_range_layers.values))
+
+
+def find_index_in_sublist(i, training_index: list):
+    """
+    find the ith sample in the training_index list
+    :param i: sample number
+    :param training_index: list of tuples
+    :return:
+    """
+    list_of_lengths = [len(t[0]) for t in training_index]
+    b = np.cumsum(np.array(list_of_lengths))
+    list_of_lengths_2 = list(range(len(list_of_lengths)))
+    c = np.digitize(i, b)
+    ind = np.where(np.array(list_of_lengths_2) == c)[0]
+    left_bound = 0 if c == 0 else b[c-1]
+    return int(ind), left_bound
