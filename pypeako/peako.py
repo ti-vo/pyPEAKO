@@ -584,8 +584,7 @@ class Peako(object):
             os.mkdir(self.plot_dir)
             print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
 
-
-    def mask_chirps(self, chirp_index: list):
+    def mask_chirps(self, chirp_index: list, spec_data=False):
         """
         mask the peaks in self.training_data in the chirps indicated by chirp_index with nan values
         :param chirp_index: list of chirp indices to be masked (starting with [0])
@@ -595,6 +594,8 @@ class Peako(object):
             c_ind = np.repeat(self.training_data[f].chirp.values, np.diff(chirp_offsets))
             for i in chirp_index:
                 self.training_data[f].peaks[:, c_ind==i, :] = np.nan
+                if spec_data:
+                    self.spec_data[f].doppler_spectrum.values[:, c_ind==i, :] = np.nan
 
     def create_training_mask(self):
         """
@@ -1194,13 +1195,13 @@ class Peako(object):
                         fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][k][f], key='PeakoPeaks')
                         ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f+1}')
                         if len(self.plot_dir) > 0:
-                            fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_peako_{j}_k{k}.png')
+                            fig.savefig(self.plot_dir + f'{mode}_{j}_height_time_peako_{f}_k{k}.png')
         for f in range(len(user_peaks)):
             fig, ax = plot_timeheight_numpeaks(user_peaks[f], key='peaks')
             ax.set_title(f'{mode}, user peaks, file number {f+1}')
             if len(self.plot_dir) > 0:
                 fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_user.png')
-
+        return algorithm_peaks
 
 
 class TrainingData(object):
@@ -1330,7 +1331,7 @@ class TrainingData(object):
                         ax[dim1, dim2].plot(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :], utils.lin2z(thisSpectrum.values))
                         ax[dim1, dim2].set_xlim([np.nanmin(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :]),
                                                  np.nanmax(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :])])
-                        ax[dim1, dim2].set_xlim([-4, 2])
+                        ax[dim1, dim2].set_xlim([-6, 1])
                         ax[dim1, dim2].set_title(f'range:'
                                                  f'{np.round(self.spec_data[n_file]["range_layers"].values[int(heightindex)]/1000, 2)} km,'
                                                  f' time: {utils.format_hms(self.spec_data[n_file]["time"].values[int(timeindex)])}' + comment,
