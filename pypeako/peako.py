@@ -196,17 +196,17 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
     figsize = kwargs['figsize'] if 'figsize' in kwargs else [10, 5.7]
     fig, ax = plt.subplots(1, figsize=figsize)
     dt_list = [datetime.datetime.utcfromtimestamp(time) for time in data.time.values]
-    var = np.transpose(np.sum(data[f'{key}'].values > -900, axis=2))
+    var = np.sum(data[f'{key}'].values > -900, axis=2)
     jumps = np.where(np.diff(data.time.values) > 60)[0]
     for ind in jumps[::-1].tolist():
         dt_list.insert(ind + 1, dt_list[ind] + datetime.timedelta(seconds=5))
-        var = np.insert(var, ind + 1, np.nan, axis=0)
+        var = np.insert(var, ind + 1, np.full(data['range'].shape, np.nan), axis=0)
 
     cmap = kwargs['cmap'] if 'cmap' in kwargs else 'viridis'  # define the colormap
     cmap = plt.get_cmap(cmap, maxpeaks+1)
 
     pcmesh = ax.pcolormesh(matplotlib.dates.date2num(dt_list[:]),
-                           data['range'].values/1000, var, cmap=cmap, vmin=-0.5, vmax=maxpeaks+0.5)#, norm=norm)
+                           data['range'].values/1000, np.transpose(var), cmap=cmap, vmin=-0.5, vmax=maxpeaks+0.5)
 
     cbar = fig.colorbar(pcmesh)
     cbar.set_ticks(list(range(maxpeaks+1)))
