@@ -193,37 +193,30 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
     :param kwargs: 'figsize', 'cmap'
     :return: fig, ax matplotlib.pyplot.subplots()
     """
-    # TODO: Center the ticks in colorbar
     figsize = kwargs['figsize'] if 'figsize' in kwargs else [10, 5.7]
-#    chirp = len(data.chirp)
     fig, ax = plt.subplots(1, figsize=figsize)
     dt_list = [datetime.datetime.utcfromtimestamp(time) for time in data.time.values]
-    cmap = kwargs['cmap'] if 'cmap' in kwargs else plt.cm.viridis  # define the colormap
-    # extract all colors from the .jet map
-    cmaplist = [cmap(i) for i in range(cmap.N)]
+    var = np.transpose(np.sum(data[f'{key}'].values > -900, axis=2))
+    jumps = np.where(np.diff(data.time.values) > 60)[0]
+    for ind in jumps[::-1].tolist():
+        dt_list.insert(ind + 1, dt_list[ind] + datetime.timedelta(seconds=5))
+        var = np.insert(var, ind + 1, np.nan, axis=0)
 
+    cmap = kwargs['cmap'] if 'cmap' in kwargs else 'viridis'  # define the colormap
+    cmap = plt.get_cmap(cmap, maxpeaks+1)
 
-    # create the new map
-    cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
-    'Custom cmap', cmaplist, cmap.N)
-    # define the bins and normalize
-    bounds = np.linspace(0, maxpeaks, maxpeaks+1)
-    norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-
-#    for c in range(chirp):
     pcmesh = ax.pcolormesh(matplotlib.dates.date2num(dt_list[:]),
-                           data['range'].values/1000, np.transpose(np.sum(data[f'{key}'].values > -900,
-                                                                   axis=2)), cmap=cmap, vmin=0, norm=norm,
-                               vmax=maxpeaks)
+                           data['range'].values/1000, var, cmap=cmap, vmin=-0.5, vmax=maxpeaks+0.5)#, norm=norm)
 
-    bar = fig.colorbar(pcmesh)
+    cbar = fig.colorbar(pcmesh)
+    cbar.set_ticks(list(range(maxpeaks+1)))
     time_extend = dt_list[-1] - dt_list[0]
     ax = set_xticks_and_xlabels(ax, time_extend)
 
     ax.set_xlabel("Time [UTC]", fontweight='semibold', fontsize=12)
     ax.set_ylabel("Range [km]", fontweight='semibold', fontsize=12)
     fig.tight_layout()
-    bar.ax.set_ylabel('number of peaks', fontweight='semibold', fontsize=12)
+    cbar.ax.set_ylabel('number of peaks', fontweight='semibold', fontsize=12)
     return fig, ax
 
 
@@ -1116,7 +1109,7 @@ class Peako(object):
                 if plot_smoothed:
                     i_max = np.argmax(self.training_result[j][k][:, -1])
                     t, h, s, w, p = self.training_result[j][k][i_max, :-1]
-                    avg_spectra = average_spectra(self.spec_data, t, h)
+                    avg_spectra = average_spectra(self.spec_data, int(t), int(h))
                     #avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
                     smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.smoothing_method)
                     smoothed_spectrum = smoothed_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
