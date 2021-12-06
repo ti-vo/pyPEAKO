@@ -1067,8 +1067,7 @@ class Peako(object):
 
         # assert that training has happened:
         self.assert_training()
-
-        # set random seed if it's given in the key word arguments:
+        plot_smoothed = kwargs['plot_smoothed'] if 'plot_smoothed' in kwargs else False
         if 'seed' in kwargs:
             random.seed(kwargs['seed'])
         k = kwargs['k'] if 'k' in kwargs else 0
@@ -1077,9 +1076,9 @@ class Peako(object):
         h_ind = []
         f_try = 0
         while len(h_ind) == 0 and f_try < 10:
-            f = random.randint(0, len(self.marked_peaks_index) - 1)
+            f = random.randint(0, len(self.marked_peaks_index[k]) - 1)
             f_try += 1
-            t_ind, h_ind = np.where(self.marked_peaks_index[f] == 1)
+            t_ind, h_ind = np.where(self.marked_peaks_index[k][f] == 1)
         if len(h_ind) == 0:
             print('no user-marked spectra found') if self.verbosity > 0 else None
             return None, None
@@ -1113,6 +1112,15 @@ class Peako(object):
                 print(f'{j}, k:{k}')
                 peako_ind = self.peako_peaks_training[j][k][f]['PeakoPeaks'].values[t_ind[i], h_ind[i], :]
                 peako_ind = peako_ind[peako_ind > 0]
+
+                if plot_smoothed:
+                    i_max = np.argmax(self.training_result[j][k][:, -1])
+                    t, h, s, w, p = self.training_result[j][k][i_max, :-1]
+                    avg_spectra = average_spectra(self.spec_data, t, h)
+                    #avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
+                    smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.smoothing_method)
+                    smoothed_spectrum = smoothed_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
+                    ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
 
                 ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
                         color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
