@@ -3,11 +3,10 @@ import scipy
 import numpy as np
 import datetime
 import math
-import warnings
 import scipy.signal as si
 import copy
 import os
-from scipy.optimize import differential_evolution, dual_annealing
+from scipy.optimize import differential_evolution
 import random
 import matplotlib
 import matplotlib.pyplot as plt
@@ -168,7 +167,6 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
             :param velbins: cloud radar Doppler bins (x values)
 
         """
-    #print(i1, i2, edge_list_1,edge_list_2,spectrum,noise_floor,velbins)
     left_edge_overlap = max(edge_list_1[0][i1], edge_list_2[0][i2])
     leftest_edge = min(edge_list_1[0][i1], edge_list_2[0][i2])
     right_edge_overlap = min(edge_list_1[1][i1], edge_list_2[1][i2])
@@ -187,7 +185,7 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
 
     """
 
-    :param data: xarray.dataset containing range, time and number of peaks
+    :param data: xarray.Dataset containing range, time and number of peaks
     :param maxpeaks: maximum number of peaks
     :param key: key (name) of the number of peaks in data
     :param kwargs: 'figsize', 'cmap'
@@ -1058,20 +1056,21 @@ class Peako(object):
         :return: fig, ax (matplotlib.pyplot.suplots() objects)
         """
 
-        # assert that training has happened:
         self.assert_training()
         plot_smoothed = kwargs['plot_smoothed'] if 'plot_smoothed' in kwargs else False
         if 'seed' in kwargs:
             random.seed(kwargs['seed'])
         k = kwargs['k'] if 'k' in kwargs else 0
-
-        # select a random user-marked spectrum
-        h_ind = []
-        f_try = 0
-        while len(h_ind) == 0 and f_try < 10:
-            f = random.randint(0, len(self.marked_peaks_index[k]) - 1)
-            f_try += 1
+        if 'f' in kwargs:
+            f = kwargs['f']
             t_ind, h_ind = np.where(self.marked_peaks_index[k][f] == 1)
+        else:
+            h_ind = []
+            f_try = 0
+            while len(h_ind) == 0 and f_try < 10:
+                f = random.randint(0, len(self.marked_peaks_index[k]) - 1)
+                f_try += 1
+                t_ind, h_ind = np.where(self.marked_peaks_index[k][f] == 1)
         if len(h_ind) == 0:
             print('no user-marked spectra found') if self.verbosity > 0 else None
             return None, None
@@ -1089,13 +1088,6 @@ class Peako(object):
 
         # plotting
         fsz = 13
-        star = matplotlib.path.Path.unit_regular_star(6)
-        circle = matplotlib.path.Path.unit_circle()
-        # concatenate the circle with an internal cutout of the star
-        verts = np.concatenate([circle.vertices, star.vertices[::-1, ...]])
-        codes = np.concatenate([circle.codes, star.codes])
-        cut_star = matplotlib.path.Path(verts, codes)
-
         fig, ax = plt.subplots(1)
         ax.plot(velbins, utils.lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
 
@@ -1120,7 +1112,7 @@ class Peako(object):
                         linestyle="None", label=f'PEAKO peaks {j} ({len(peako_ind)})', markersize=[8, 7, 6][c_ind])
                 c_ind += 1
 
-        ax.plot(velbins[user_ind], utils.lin2z(spectrum)[user_ind], marker=cut_star, color='r',
+        ax.plot(velbins[user_ind], utils.lin2z(spectrum)[user_ind], marker=utils.cut_star, color='r',
                 linestyle="None", label=f'user peaks ({len(user_ind)})')
         ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
         ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
@@ -1136,15 +1128,68 @@ class Peako(object):
 
         return fig, ax
 
-    def plot_algorithm_spectrum(self,  file, time, height, mode='training'):
+    def plot_algorithm_spectrum(self, file, time, height, mode='training', k=0, method='loop', **kwargs):
         """
         :param file: number of file (integer)
         :param time: the time of the spectrum to plot (datetime.datetime)
         :param height: the range of the spectrum to plot (km)
-        :param mode: 'training', 'testing'
+        :param mode: 'training', 'manual'
         :return:
         """
-        pass
+        fsz=13
+        plot_smoothed = kwargs['plot_smoothed'] if 'plot_smoothed' in kwargs else False
+        time_index = utils.get_closest_time(time, self.spec_data[file].time)
+        range_index = utils.argnearest(self.spec_data[file].range_layers, height)
+        spectrum = self.spec_data[file].doppler_spectrum.isel(time=time_index, range=range_index)
+        c = np.digitize(range_index, utils.get_chirp_offsets(self.spec_data[file]))
+        velbins = self.spec_data[file]['velocity_vectors'].values[c-1, :]
+
+        fig, ax = plt.subplots(1)
+        ax.plot(velbins, utils.lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
+
+        if mode == 'training':
+            self.assert_training()
+            self.check_store_found_peaks()
+            peako_ind = self.peako_peaks_training[method][k][file]['PeakoPeaks'].values[time_index, range_index, :]
+            peako_ind = peako_ind[peako_ind > 0]
+            i_max = np.argmax(self.training_result[method][k][:, -1])
+            t, h, s, w, p = self.training_result[method][k][i_max, :-1]
+
+        elif mode == 'manual':
+            assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
+            t, h, s, w, p = kwargs['peako_params']
+            algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
+                                                                width=w, prom=p, smoothing_method=self.smoothing_method,
+                                                                fill_value=self.fill_value, max_peaks=self.max_peaks,
+                                                                all_spectra=True)
+            peako_ind = algorithm_peaks[file].PeakoPeaks.values[time_index, range_index, :]
+            peako_ind = peako_ind[peako_ind > 0]
+
+
+        if plot_smoothed:
+            avg_spectra = average_spectra(self.spec_data, int(t), int(h))
+            smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.smoothing_method)
+            smoothed_spectrum = smoothed_spectra[file]['doppler_spectrum'].values[time_index, range_index, :]
+            ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
+
+
+        ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
+                color='#0339cc', markeredgecolor='k',
+                linestyle="None", label=f'PEAKO peaks {method} ({len(peako_ind)})', markersize=8)
+
+        ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
+        ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
+        ax.grid(linestyle=':')
+        ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
+        ax.legend(fontsize=fsz)
+        plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+        ax.set_title(f'spectrum at {round(self.spec_data[file]["range_layers"].values[range_index])} m, '
+                     f'{utils.format_hms(self.spec_data[file]["time"].values[time_index])}')
+        if len(self.plot_dir) > 0:
+            fig.savefig(self.plot_dir + f'algorithm_peaks_{round(self.spec_data[file]["range_layers"].values[range_index])}m'
+                                        f'_{utils.format_hms(self.spec_data[file]["time"].values[time_index])}_k{k}.png')
+        return fig, ax
+
 
     def test_peako(self, test_data, **kwargs):
         """

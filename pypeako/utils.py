@@ -1,5 +1,13 @@
 import numpy as np
 import datetime
+import matplotlib
+
+star = matplotlib.path.Path.unit_regular_star(6)
+circle = matplotlib.path.Path.unit_circle()
+# concatenate the circle with an internal cutout of the star
+verts = np.concatenate([circle.vertices, star.vertices[::-1, ...]])
+codes = np.concatenate([circle.codes, star.codes])
+cut_star = matplotlib.path.Path(verts, codes)
 
 
 def lin2z(array):
@@ -53,6 +61,7 @@ def mask_velocity_vectors(spec_data: list):
         np.putmask(spec_data[i].velocity_vectors.values, spec_data[i].velocity_vectors.values > 9000, np.nan)
     return spec_data
 
+
 def mask_fill_values(spec_data: list):
 
     for i in range(len(spec_data)):
@@ -60,6 +69,7 @@ def mask_fill_values(spec_data: list):
             np.putmask(spec_data[i].doppler_spectrum.values,
                        spec_data[i].doppler_spectrum.values == spec_data._FillValue, np.nan)
     return spec_data
+
 
 def get_vel_resolution(vel_bins):
     return np.nanmedian(np.diff(vel_bins))
@@ -103,3 +113,16 @@ def find_index_in_sublist(i, training_index: list):
     ind = np.where(np.array(list_of_lengths_2) == c)[0]
     left_bound = 0 if c == 0 else b[c-1]
     return int(ind), left_bound
+
+
+def get_closest_time(time, time_array):
+    """"
+    :param time: datetime.datetime
+    :param time_array: xr.DataArray containing time stamp
+    """
+    time_array = time_array.values
+    if (time_array < 1e9).all() and (time_array > 3e8).all():
+        time_array = (datetime.datetime(2001, 1, 1) - datetime.datetime(1970, 1, 1)).total_seconds() + time_array
+    ts = (time - datetime.datetime(1970, 1, 1)).total_seconds()
+    return argnearest(time_array, ts)
+
