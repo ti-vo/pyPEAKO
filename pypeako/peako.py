@@ -1128,66 +1128,65 @@ class Peako(object):
 
         return fig, ax
 
-    def plot_algorithm_spectrum(self, file, time, height, mode='training', k=0, method='loop', **kwargs):
+    def plot_algorithm_spectrum(self, file, time:list, height:list, mode='training', k=0, method='loop', **kwargs):
         """
         :param file: number of file (integer)
-        :param time: the time of the spectrum to plot (datetime.datetime)
-        :param height: the range of the spectrum to plot (km)
+        :param time: the time(s) of the spectrum to plot (datetime.datetime)
+        :param height: the range(s) of the spectrum to plot (km)
         :param mode: 'training', 'manual'
         :return:
         """
-        fsz=13
+        fsz = 13
         plot_smoothed = kwargs['plot_smoothed'] if 'plot_smoothed' in kwargs else False
-        time_index = utils.get_closest_time(time, self.spec_data[file].time)
-        range_index = utils.argnearest(self.spec_data[file].range_layers, height)
-        spectrum = self.spec_data[file].doppler_spectrum.isel(time=time_index, range=range_index)
-        c = np.digitize(range_index, utils.get_chirp_offsets(self.spec_data[file]))
-        velbins = self.spec_data[file]['velocity_vectors'].values[c-1, :]
-
-        fig, ax = plt.subplots(1)
-        ax.plot(velbins, utils.lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
+        time_index = [utils.get_closest_time(t, self.spec_data[file].time) for t in time]
+        range_index = [utils.argnearest(self.spec_data[file].range_layers, h) for h in height]
 
         if mode == 'training':
             self.assert_training()
             self.check_store_found_peaks()
-            peako_ind = self.peako_peaks_training[method][k][file]['PeakoPeaks'].values[time_index, range_index, :]
-            peako_ind = peako_ind[peako_ind > 0]
+            algorithm_peaks = self.peako_peaks_training[method][k]
             i_max = np.argmax(self.training_result[method][k][:, -1])
             t, h, s, w, p = self.training_result[method][k][i_max, :-1]
-
         elif mode == 'manual':
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
             t, h, s, w, p = kwargs['peako_params']
             algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
-                                                                width=w, prom=p, smoothing_method=self.smoothing_method,
-                                                                fill_value=self.fill_value, max_peaks=self.max_peaks,
-                                                                all_spectra=True)
-            peako_ind = algorithm_peaks[file].PeakoPeaks.values[time_index, range_index, :]
-            peako_ind = peako_ind[peako_ind > 0]
-
+                                                    width=w, prom=p, smoothing_method=self.smoothing_method,
+                                                    fill_value=self.fill_value, max_peaks=self.max_peaks,
+                                                    all_spectra=True)
 
         if plot_smoothed:
             avg_spectra = average_spectra(self.spec_data, int(t), int(h))
             smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.smoothing_method)
-            smoothed_spectrum = smoothed_spectra[file]['doppler_spectrum'].values[time_index, range_index, :]
-            ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
 
+        for t_i, h_i in list(zip(time_index, range_index)):
+            c = np.digitize(h_i, utils.get_chirp_offsets(self.spec_data[file]))
+            velbins = self.spec_data[file]['velocity_vectors'].values[c-1, :]
+            fig, ax = plt.subplots(1)
+            peako_ind = algorithm_peaks[file].PeakoPeaks.values[t_i, h_i, :]
+            peako_ind = peako_ind[peako_ind > 0]
 
-        ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
-                color='#0339cc', markeredgecolor='k',
-                linestyle="None", label=f'PEAKO peaks {method} ({len(peako_ind)})', markersize=8)
+            spectrum = self.spec_data[file].doppler_spectrum.isel(time=t_i, range=h_i)
+            ax.plot(velbins, utils.lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
+            if plot_smoothed:
+                smoothed_spectrum = smoothed_spectra[file]['doppler_spectrum'].values[t_i, h_i, :]
+                ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
 
-        ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
-        ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
-        ax.grid(linestyle=':')
-        ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
-        ax.legend(fontsize=fsz)
-        plt.tight_layout(rect=[0, 0.05, 1, 0.95])
-        ax.set_title(f'spectrum at {round(self.spec_data[file]["range_layers"].values[range_index])} m, '
-                     f'{utils.format_hms(self.spec_data[file]["time"].values[time_index])}')
-        if len(self.plot_dir) > 0:
-            fig.savefig(self.plot_dir + f'algorithm_peaks_{round(self.spec_data[file]["range_layers"].values[range_index])}m'
-                                        f'_{utils.format_hms(self.spec_data[file]["time"].values[time_index])}_k{k}.png')
+            ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
+                    color='#0339cc', markeredgecolor='k',
+                    linestyle="None", label=f'PEAKO peaks {method} ({len(peako_ind)})', markersize=8)
+
+            ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
+            ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
+            ax.grid(linestyle=':')
+            ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
+            ax.legend(fontsize=fsz)
+            plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+            ax.set_title(f'spectrum at {round(self.spec_data[file]["range_layers"].values[h_i])} m, '
+                         f'{utils.format_hms(self.spec_data[file]["time"].values[t_i])}')
+            if len(self.plot_dir) > 0:
+                fig.savefig(self.plot_dir + f'algorithm_peaks_{round(self.spec_data[file]["range_layers"].values[h_i])}m'
+                                            f'_{utils.format_hms(self.spec_data[file]["time"].values[t_i])}_k{k}.png')
         return fig, ax
 
 
