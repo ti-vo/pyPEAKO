@@ -1117,7 +1117,7 @@ class Peako(object):
         ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
         ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
         ax.grid(linestyle=':')
-        ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
+        ax.set_xlim(-6, 1.5)
         ax.legend(fontsize=fsz)
         plt.tight_layout(rect=[0, 0.05, 1, 0.95])
         ax.set_title(f'spectrum at {round(self.spec_data[f]["range_layers"].values[h_ind[i]])} m, '
@@ -1179,7 +1179,7 @@ class Peako(object):
             ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
             ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
             ax.grid(linestyle=':')
-            ax.set_xlim(np.nanmin(velbins), np.nanmax(velbins))
+            ax.set_xlim(-6, 1.5)
             ax.legend(fontsize=fsz)
             plt.tight_layout(rect=[0, 0.05, 1, 0.95])
             ax.set_title(f'spectrum at {round(self.spec_data[file]["range_layers"].values[h_i])} m, '
