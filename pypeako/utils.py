@@ -16,7 +16,7 @@ def lin2z(array):
     :param array: np.array or single number
     :return:
     """
-    return 10 * np.ma.log10(array)
+    return 10 * np.log10(array)
 
 
 def format_hms(unixtime):
@@ -68,6 +68,8 @@ def mask_fill_values(spec_data: list):
         if "_FillValue" in spec_data[i].attrs:
             np.putmask(spec_data[i].doppler_spectrum.values,
                        spec_data[i].doppler_spectrum.values == spec_data._FillValue, np.nan)
+        np.putmask(spec_data[i].doppler_spectrum.values,
+                       spec_data[i].doppler_spectrum.values <= 1e-10, np.nan)
     return spec_data
 
 
