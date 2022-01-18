@@ -812,7 +812,8 @@ class Peako(object):
                 # convert velocities to indices
                 user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
                 spectrum = s_data[f]['doppler_spectrum'].values[t, h, :]
-                spectrum_db = utils.lin2z(spectrum).filled(0.0)
+                spectrum_db = utils.lin2z(spectrum)
+                spectrum_db[np.isnan(spectrum_db)] = 0.0
                 spectrum_db[spectrum == self.fill_value] = 0.0
                 user_peaks.sort()
                 peako_peaks = algorithm_peaks[f]['PeakoPeaks'].values[t,h, :]
