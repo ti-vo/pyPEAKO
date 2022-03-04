@@ -646,6 +646,8 @@ class Peako(object):
         self.create_training_mask()
         if not self.k_fold_cv:
             result = self.train_peako_inner()
+            print(f'number of samples: '
+                  f'{np.sum([np.sum(self.marked_peaks_index[self.current_k][f].values ==1) for f in range(len(self.spec_data))])}')
             return result
         else:
             # k is set, the result becomes a list
@@ -654,6 +656,7 @@ class Peako(object):
             max_sim = self.compute_maximum_similarity(mode='validation')
             for k in range(self.k):
                 result = self.train_peako_inner()['training result'][0]
+
                 val_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=result['t_avg'],
                                                       h_avg=result['h_avg'], span=result['span'],
                                                       width=result['width'], prom=result['prom'],
