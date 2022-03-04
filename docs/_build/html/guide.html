@@ -1,0 +1,209 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>How to use pyPEAKO &#8212; pypeako 0.0.1 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Installation" href="installation.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="how-to-use-pypeako">
+<h1>How to use pyPEAKO<a class="headerlink" href="#how-to-use-pypeako" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="creating-training-data">
+<h2>Creating training data<a class="headerlink" href="#creating-training-data" title="Permalink to this headline">¶</a></h2>
+<p>Training data contains the locations of peaks in cloud radar Doppler spectra, which have been marked by a human user. To create training data, spectra files must be in the cloudnet specific netcdf format. A sample is provided in sample_spectra.nc.
+Let’s use the sample data set to create some training data.</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">pkg_resources</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">pkg_resources</span><span class="o">.</span><span class="n">resource_filename</span><span class="p">(</span><span class="s1">&#39;peako&#39;</span><span class="p">,</span> <span class="s1">&#39;sample_spectra.nc&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><em>data</em> is a string which contains the path to the sample data file. Now we can load it into a TrainingData object:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">peako</span>
+<span class="n">P</span> <span class="o">=</span> <span class="n">peako</span><span class="o">.</span><span class="n">TrainingData</span><span class="p">([</span><span class="n">data</span><span class="p">],</span> <span class="n">num_spec</span><span class="o">=</span><span class="p">[</span><span class="mi">10</span><span class="p">])</span>
+</pre></div>
+</div>
+<p>We pass the location of sample data to the TrainingData object in a list (which can contain the paths to several spectra files). For this purpose, we only want to mark peaks in 10 spectra by hand. If we don’t set num_spec, this number is left at the default value, which would be 30. We can also set the maximum number of peaks to be marked when initializing the TrainingData object. The default is 5.
+Now we can mark peaks in Doppler spectra:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">P</span><span class="o">.</span><span class="n">mark_random_spectra</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>This will open a plot in a pop-up. Spectra are drawn randomly from the spectra netcdf file and plotted for marking peaks. If this doesn’t work, try playing around with the matplotlib settings, i.e. declare matplotlib.use(‘TkAgg’) in your script before calling mark_random_spectra.
+The pop up will look something like this:</p>
+<div class="figure align-center" id="id1">
+<a class="reference internal image-reference" href="_images/screenshot.png"><img alt="_images/screenshot.png" src="_images/screenshot.png" style="width: 500px;" /></a>
+<p class="caption"><span class="caption-text">Screenshot of the GUI used for marking peaks by the user.</span></p>
+</div>
+<p>Mark the peak(s) in the plot in the center panel. Red markers will show you the points you marked. Use right-click to remove the previous mark if you want to change the location of the peak. Then hit Enter. If there is no peak in the spectrum displayed, hit Enter without marking peaks to move on to the next spectrum. You will get as many spectrum plots as you specified in <em>num_spec</em> in the previous step.</p>
+<p>In the final step, we have to save the training data:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">P</span><span class="o">.</span><span class="n">save_training_data</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>This will create a netcdf file named <em>marked_peaks_[name_of_specfile].nc</em> in the same folder containing the spectra netcdf file. If such a netcdf file already exists, i.e. when you created training data already with the same spectra file, the found peaks will be added to the existing file.</p>
+</div>
+<div class="section" id="training-the-algorithm">
+<h2>Training the algorithm<a class="headerlink" href="#training-the-algorithm" title="Permalink to this headline">¶</a></h2>
+<p>PEAKO will use the user-marked peaks passed to the Peako() object for training. For detection of peaks, spectra are
+averaged both in time and height using a variable number of neighbors in time and range dimension. In the next step,
+smoothing of the averaged spectrum is performed. The method for smoothing is set in the Peako() object. ‘loess’
+smoothing (locally estimated scatterplot smoothing), which is also referred to as Savitzky-Golay filter, is the default
+smoothing method (scipy.signal.savgol_filter(polyorder=2) ). In this averaged and smoothed spectrum, local maxima are
+detected, again using the scipy.signal toolbox. Maxima which don’t fulfill the requirements of minimum peak
+prominence  or minimum peak width are discarded. During training, PEAKO looks for the combination of number of
+“neighboring” spectra in temporal and spatial domain over which to average, the span used for smoothing, the minimum
+peak prominence and minimum peak width, which best reproduces the user-marked peaks. The similarity between user-marked
+and algorithm-detected peaks is a measure based on the overlapping area below the spectrum. Different options for
+training are available:</p>
+<ul class="simple">
+<li>looping over all possible parameter combinations of time averages, range averages, span, width and prominence</li>
+<li>differential evolution from the scipy.optimize toolbox</li>
+</ul>
+<p>Again using the example data provided in the package, we can set the Peako() parameters:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">training_data</span> <span class="o">=</span> <span class="n">pkg_resources</span><span class="o">.</span><span class="n">resource_filename</span><span class="p">(</span><span class="s1">&#39;peako&#39;</span><span class="p">,</span> <span class="s1">&#39;marked_peaks_sample_spectra.nc&#39;</span><span class="p">)</span>
+<span class="n">Q</span> <span class="o">=</span> <span class="n">peako</span><span class="o">.</span><span class="n">Peako</span><span class="p">([</span><span class="n">training_data</span><span class="p">])</span>
+<span class="n">Q</span><span class="o">.</span><span class="n">optimization_method</span> <span class="o">=</span> <span class="s1">&#39;loop&#39;</span> <span class="c1"># &#39;scipy&#39; to use differential evolution from scipy</span>
+<span class="n">Q</span><span class="o">.</span><span class="n">training_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;t_avg&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">),</span> <span class="s1">&#39;h_avg&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="s1">&#39;span&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mf">0.005</span><span class="p">,</span> <span class="mf">0.02</span><span class="p">,</span> <span class="mf">0.005</span><span class="p">),</span>
+   <span class="s1">&#39;width&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">),</span> <span class="s1">&#39;prom&#39;</span><span class="p">:</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">)}</span>
+</pre></div>
+</div>
+<p>The <em>training_params</em> set in the dictionary are defined as follows:</p>
+<ul class="simple">
+<li><em>t_avg and h_avg</em>: number of neighbors each side over which temporal/ spatial averaging is performed. I.e. if h_avg is set to 1, averaging over three range bins will be performed with the spectrum of interest in the center range bin.</li>
+<li><em>span</em>: the span which is used for loess or lowess smoothing from the scipy.signal toolkit</li>
+<li><em>width</em>: minimum peak width in m/s</li>
+<li><em>prom</em>: minimum peak prominence in dBZ</li>
+</ul>
+<p>If <em>optimization_method</em> is set to ‘scipy’, the minimum and maximum of each of the dictionary items are used as bounds for
+the search. In the next step, we can train the algorithm:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">result</span> <span class="o">=</span> <span class="n">Q</span><span class="o">.</span><span class="n">train_peako</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>This will return a dictionary with the parameter combination of <em>t_avg</em>, <em>h_avg</em>, <em>span</em>, <em>width</em> and <em>prom</em> which
+yielded the best agreement with the training data. The parameter combinations which have been looped through, together
+with the respective similarity, are stored in Q.training_result.</p>
+<p>We can also train Peako another time on the same data using <em>differential evolution</em> to see the difference it makes:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Q</span><span class="o">.</span><span class="n">optimization_method</span> <span class="o">=</span> <span class="s1">&#39;scipy&#39;</span>
+<span class="n">result_2</span> <span class="o">=</span> <span class="n">Q</span><span class="o">.</span><span class="n">train_peako</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>Caution, this may take a while.</p>
+</div>
+<div class="section" id="evaluating-the-training-result">
+<h2>Evaluating the training result<a class="headerlink" href="#evaluating-the-training-result" title="Permalink to this headline">¶</a></h2>
+<p>pyPEAKO has an in-built function for evaluating the training result, which can be called via</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Q</span><span class="o">.</span><span class="n">training_stats</span><span class="p">(</span><span class="n">make_3d_plots</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>By setting <em>make_3d_plots</em> to True, pyPEAKO will generate some 3D plots to show the effect of the different parameters
+on the resulting similarity.</p>
+<div class="figure align-center" id="id2">
+<a class="reference internal image-reference" href="_images/screenshot2.png"><img alt="_images/screenshot2.png" src="_images/screenshot2.png" style="width: 500px;" /></a>
+<p class="caption"><span class="caption-text">Example 3D plots of two variables (x and y axes) versus similarity (z axis)</span></p>
+</div>
+<p>We can also look at a couple of example spectra</p>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">pypeako</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="overview.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">How to use pyPEAKO</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#creating-training-data">Creating training data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#training-the-algorithm">Training the algorithm</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#evaluating-the-training-result">Evaluating the training result</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="installation.html" title="previous chapter">Installation</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Teresa Vogl.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.8.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/guide.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

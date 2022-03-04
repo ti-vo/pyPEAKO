@@ -81,10 +81,7 @@ def find_edges(spectrum, fill_value, peak_locations):
             left_edge = closest_below_noise_left
         elif peak_locations[p_ind - 1] > closest_below_noise_left:
             # merged peaks
-            try:
-                left_edge = np.argmin(spectrum[peak_locations[p_ind - 1]: p_l])
-            except ValueError:
-                print('Hello')
+            left_edge = np.argmin(spectrum[peak_locations[p_ind - 1]: p_l])
             left_edge = left_edge + peak_locations[p_ind - 1]
         else:
             left_edge = closest_below_noise_left
@@ -363,7 +360,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
     :param kwargs: 'verbosity'
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
-    print('smoothing...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+    print(f'smoothing using {method}...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
     spectra_out = [i.copy(deep=True) for i in averaged_spectra]
     if span == 0.0:
         return spectra_out
@@ -374,18 +371,18 @@ def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
             window_length = utils.round_to_odd(span / utils.get_vel_resolution(velbins))
             print(f'chirp {c+1}, window length {window_length}, for span = {span} m/s') if \
                 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+            spec_chunk = spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :]
+            nanmask = np.isnan(spec_chunk)
+            spec_chunk[nanmask] = 0.
             if window_length == 1:
                 pass
             elif method == 'loess':
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
-                    averaged_spectra[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :], window_length,
-                    polyorder=2, axis=2, mode='nearest')
+                    spec_chunk, window_length, polyorder=2, axis=2, mode='nearest')
             elif method == 'lowess':
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
-                    averaged_spectra[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :],
-                    window_length,
-                    polyorder=1, axis=2,
-                    mode='nearest')
+                   spec_chunk, window_length, polyorder=1, axis=2, mode='nearest')
+            spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
     return spectra_out
 
 
@@ -457,13 +454,13 @@ def peak_detection_dask(spectra_array, prom, fill_value, width_thresh, max_peaks
     :return:
     """
     spectra_db = utils.lin2z(spectra_array)
-    fillvalue = np.ma.filled(np.nanmin(spectra_db, axis=2)[:, :, np.newaxis], -100.)
-    #spectra_db = np.ma.filled(spectra_db, fillvalue)
+    fillvalue = -100. #np.ma.filled(np.nanmin(spectra_db, axis=2)[:, :, np.newaxis], -100.)
+    spectra_db[np.isnan(spectra_db)] = fillvalue
     out = np.empty_like(spectra_db)
     for tt in range(spectra_db.shape[0]):
         for rr in range(spectra_db.shape[1]):
-            out[tt, rr, :] = detect_single_spectrum(spectra_db[tt, rr, :], fillvalue[tt, rr, 0], prom, width_thresh,
-                                                       max_peaks)
+            out[tt, rr, :] = detect_single_spectrum(spectra_db[tt, rr, :], -100, #fillvalue[tt, rr, 0],
+                                                    prom, width_thresh, max_peaks)
     return out
 
 
@@ -656,7 +653,7 @@ class Peako(object):
             self.current_k = 0
             max_sim = self.compute_maximum_similarity(mode='validation')
             for k in range(self.k):
-                result = self.train_peako_inner()
+                result = self.train_peako_inner()['training result'][0]
                 val_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=result['t_avg'],
                                                       h_avg=result['h_avg'], span=result['span'],
                                                       width=result['width'], prom=result['prom'],
@@ -808,7 +805,7 @@ class Peako(object):
             t_ind, h_ind = np.where(marked_peaks[f] == 1)
             for h, t in zip(h_ind, t_ind):
                 user_peaks = t_data[f]['peaks'].values[t, h, :]
-                user_peaks = user_peaks[~np.isnan(user_peaks)]
+                user_peaks = np.unique(user_peaks[~np.isnan(user_peaks)])
                 # convert velocities to indices
                 user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
                 spectrum = s_data[f]['doppler_spectrum'].values[t, h, :]
@@ -817,7 +814,7 @@ class Peako(object):
                 spectrum_db[spectrum == self.fill_value] = 0.0
                 user_peaks.sort()
                 peako_peaks = algorithm_peaks[f]['PeakoPeaks'].values[t,h, :]
-                peako_peaks = peako_peaks[peako_peaks > 0]
+                peako_peaks = np.unique(peako_peaks[peako_peaks > 0])
                 peako_peaks.sort()
                 le_user_peaks, re_user_peaks = find_edges(spectrum, self.fill_value, user_peaks)
                 le_alg_peaks, re_alg_peaks = find_edges(spectrum, self.fill_value, peako_peaks)
@@ -1098,7 +1095,7 @@ class Peako(object):
         ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
         ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
         ax.grid(linestyle=':')
-        ax.set_xlim(-6, 1.5)
+        ax.set_xlim(-6, 2.5)
         ax.legend(fontsize=fsz)
         plt.tight_layout(rect=[0, 0.05, 1, 0.95])
         ax.set_title(f'spectrum at {round(self.spec_data[f]["range_layers"].values[h_ind[i]])} m, '
@@ -1161,7 +1158,7 @@ class Peako(object):
             ax.set_xlabel('Doppler Velocity [m s$^{-1}$]', fontweight='semibold', fontsize=fsz)
             ax.set_ylabel('Reflectivity [dBZ]', fontweight='semibold', fontsize=fsz)
             ax.grid(linestyle=':')
-            ax.set_xlim(-6, 1.5)
+            ax.set_xlim(-8, 2.5)
             ax.legend(fontsize=fsz)
             plt.tight_layout(rect=[0, 0.05, 1, 0.95])
             ax.set_title(f'spectrum at {round(self.spec_data[file]["range_layers"].values[h_i])} m, '
@@ -1288,12 +1285,13 @@ class TrainingData(object):
             self.peaks_ncfiles.append(ncfile)
             self.plot_count.append(0)
 
-    def mark_random_spectra(self, **kwargs):
+    def mark_random_spectra(self, plot_smoothed=False, **kwargs):
         """
         Mark random spectra in TrainingData.spec_data (number of randomly drawn spectra in time-height space defined by
         TrainingData.num_spec) and save x and y locations
         :param kwargs:
                num_spec: update TrainingData.num_spec
+               span: span for smoothing. Required if plot_smoothed=True
         """
 
         if 'num_spec' in kwargs:
@@ -1304,13 +1302,13 @@ class TrainingData(object):
                 random_index_t = random.randint(1, self.tdim[n]-1)
                 random_index_r = random.randint(1, self.rdim[n]-1)
                 print(f'r: {random_index_r}, t: {random_index_t}')
-                vals, powers = self.input_peak_locations(n, random_index_t, random_index_r)
+                vals, powers = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
                 if not np.all(np.isnan(vals)):
                     self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
                     s += 1
                     self.plot_count[n] = s
 
-    def input_peak_locations(self, n_file, t_index, r_index):
+    def input_peak_locations(self, n_file, t_index, r_index, plot_smoothed, **kwargs):
         """
         :param n_file: the index of the netcdf file from which to mark spectrum by hand
         :param t_index: the time index of the spectrum
@@ -1319,9 +1317,9 @@ class TrainingData(object):
         :return peakPowers: The y values (in units of dBZ) of the marked peaks
         """
 
-        #matplotlib.use('TkAgg')
         peakVals = []
         peakPowers = []
+        # TODO replace with utils.get_chirp_offsets
         n_rg = self.spec_data[n_file]['chirp_start_indices']
         c_ind = np.digitize(r_index, n_rg)
         #print(f'range index {r_index} is in chirp {c_ind} with ranges in chirps {n_rg[1:]}')
@@ -1330,9 +1328,11 @@ class TrainingData(object):
         timeindex_center = t_index
         this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(timeindex_center), int(heightindex_center),
                                                                         :]
-
         #print(f'time index center: {timeindex_center}, height index center: {heightindex_center}')
         if not np.sum(~np.isnan(this_spectrum_center.values)) < 2:
+            velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
+            xlim = velbins.values[~np.isnan(this_spectrum_center.values)][[0, -1]]
+            xlim += [-1, +1]
             # if this spectrum is not empty, we plot 3x3 panels with shared x and y axes
             fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
             fig.suptitle(f'Mark peaks in spectrum in center panel. Fig. {self.plot_count[n_file]+1} out of '
@@ -1340,7 +1340,7 @@ class TrainingData(object):
             for dim1 in range(3):
                 for dim2 in range(3):
                     if not (dim1 == 1 and dim2 == 1):  # if this is not the center panel plot
-                        comment = ''
+                        comment = ' '
                         heightindex = r_index - 1 + dim1
                         timeindex = t_index - 1 + dim2
                         if heightindex == self.spec_data[n_file]['doppler_spectrum'].shape[1]:
@@ -1351,27 +1351,31 @@ class TrainingData(object):
                             comment = comment + ' (time boundary)'
 
                         thisSpectrum = self.spec_data[n_file]['doppler_spectrum'][int(timeindex), int(heightindex), :]
+
                         #print(f'time index: {timeindex}, height index: {heightindex}')
                         if heightindex == -1 or timeindex == -1:
                             thisSpectrum = thisSpectrum.where(thisSpectrum.values == -999)
                             comment = comment + ' (time or range boundary)'
 
-                        ax[dim1, dim2].plot(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :], utils.lin2z(thisSpectrum.values))
-                        ax[dim1, dim2].set_xlim([np.nanmin(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :]),
-                                                 np.nanmax(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :])])
-                        ax[dim1, dim2].set_xlim([-6, 1])
+                        ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
+                        ax[dim1, dim2].set_xlim(xlim)
                         ax[dim1, dim2].set_title(f'range:'
                                                  f'{np.round(self.spec_data[n_file]["range_layers"].values[int(heightindex)]/1000, 2)} km,'
                                                  f' time: {utils.format_hms(self.spec_data[n_file]["time"].values[int(timeindex)])}' + comment,
                                                  fontweight='semibold', fontsize=9, color='b')
-                        # if thisnoisefloor != 0.0:
-                        #    ax[dim1, dim2].axhline(h.lin2z(thisnoisefloor),color='k')
                         ax[dim1, dim2].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
                         ax[dim1, dim2].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
-                        #ax[dim1, dim2].set_xlim(xrange)
                         ax[dim1, dim2].grid(True)
 
-            ax[1, 1].plot(self.spec_data[n_file]['velocity_vectors'][c_ind-1, :], utils.lin2z(this_spectrum_center.values))
+            ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values))
+            if plot_smoothed:
+                assert 'span' in kwargs, "span required for mark_random_spectra if plot_smoothed is True"
+                window_length = utils.round_to_odd(kwargs['span'] / utils.get_vel_resolution(velbins))
+                smoothed_spectrum = utils.lin2z(this_spectrum_center.values)
+                smoothed_spectrum[~np.isnan(smoothed_spectrum)] = scipy.signal.savgol_filter(
+                    smoothed_spectrum[~np.isnan(smoothed_spectrum)], window_length, polyorder=2, mode='nearest')
+                ax[1, 1].plot(velbins, smoothed_spectrum)
+
             ax[1, 1].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
             ax[1, 1].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
             ax[1, 1].grid(True)

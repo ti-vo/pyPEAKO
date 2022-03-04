@@ -15,14 +15,14 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath('.'))
-sys.path.insert(0, os.path.abspath('../../src/'))
+sys.path.insert(0, os.path.abspath('../../pypeako/'))
 
 
 # -- Project information -----------------------------------------------------
 
 project = 'pypeako'
-copyright = '2020, Teresa Vogl'
-author = 'Teresa Vogl'
+copyright = '2022, Teresa Vogl, Martin Radenz'
+author = 'Teresa Vogl, Martin Radenz'
 
 # The short X.Y version
 version = '0.0'

@@ -1,6 +1,7 @@
 import numpy as np
 import datetime
 import matplotlib
+import warnings
 
 star = matplotlib.path.Path.unit_regular_star(6)
 circle = matplotlib.path.Path.unit_circle()
@@ -16,7 +17,8 @@ def lin2z(array):
     :param array: np.array or single number
     :return:
     """
-    return 10 * np.log10(array)
+    with warnings.catch_warnings():
+        return 10 * np.log10(array)
 
 
 def format_hms(unixtime):
@@ -63,6 +65,10 @@ def mask_velocity_vectors(spec_data: list):
 
 
 def mask_fill_values(spec_data: list):
+    """
+    Mask fill values and very small values below 1e-10 mm6 m-3 with nan
+    :param spec_data: dataset containing Doppler spectra
+    """
 
     for i in range(len(spec_data)):
         if "_FillValue" in spec_data[i].attrs:

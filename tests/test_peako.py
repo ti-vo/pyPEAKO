@@ -246,3 +246,9 @@ def test_training_stats():
     P = pypeako.Peako()
     P.training_result['loop'] = training_result
     P.marked_peaks_index = [1, 2, 3, 4]
+
+
+def test_average_single_bin():
+    specdata_values = np.array([[1, np.nan, 1, 1, 1],[np.nan, 1, 1, 1, 1], [1, 1, np.nan, 1, 1], [1, 1, 1, np.nan,1],
+                                [1, 1, 1, 1, np.nan]])
+    B = np.array([[0.25, 0.25], [0.25, 0.25]])

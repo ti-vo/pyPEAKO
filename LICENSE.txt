@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2020 Teresa Vogl
+Copyright (c) 2022 Teresa Vogl, Martin Radenz
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

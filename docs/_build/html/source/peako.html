@@ -1,0 +1,545 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>peako module &#8212; pypeako 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="module-peako">
+<span id="peako-module"></span><h1>peako module<a class="headerlink" href="#module-peako" title="Permalink to this headline">¶</a></h1>
+<dl class="class">
+<dt id="peako.Peako">
+<em class="property">class </em><code class="descclassname">peako.</code><code class="descname">Peako</code><span class="sig-paren">(</span><em>training_data</em>, <em>peak_detection='peako'</em>, <em>optimization_method='loop'</em>, <em>smoothing_method='loess'</em>, <em>max_peaks=5</em>, <em>**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="method">
+<dt id="peako.Peako.area_peaks_similarity">
+<code class="descname">area_peaks_similarity</code><span class="sig-paren">(</span><em>algorithm_peaks</em>, <em>array_out=False</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.area_peaks_similarity" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
+peaks in a radar Doppler spectrum</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>algorithm_peaks</strong> – ndarray of indices of spectrum where peako detected peaks</li>
+<li><strong>array_out</strong> – Bool. If True, area_peaks_similarity will return a list of xr.Datasets containing the</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+<p>computed similarities for each spectrum in the time-height grid. If False, the integrated similarity (sum)
+of all the hand-marked spectra is returned. Default is False.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.assert_training">
+<code class="descname">assert_training</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.assert_training" title="Permalink to this definition">¶</a></dt>
+<dd><p>assertion that training has happened. Checks if there is a training mask in Peako.marked_peaks_index and that
+there is a training result stored in Peako.training_result.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.average_smooth_detect">
+<code class="descname">average_smooth_detect</code><span class="sig-paren">(</span><em>t_avg</em>, <em>h_avg</em>, <em>span</em>, <em>width</em>, <em>prom</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.average_smooth_detect" title="Permalink to this definition">¶</a></dt>
+<dd><p>Average, smooth spectra and detect peaks that fulfill prominence and with criteria</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>t_avg</strong> – numbers of neighbors in time dimension to average over (on each side)</li>
+<li><strong>h_avg</strong> – numbers of neighbors in range dimension to average over (on each side)</li>
+<li><strong>span</strong> – Percentage of number of data points used for smoothing when loess or lowess smoothing is used</li>
+<li><strong>width</strong> – minimum peak width in m/s Doppler velocity (width at half-height)</li>
+<li><strong>prom</strong> – minimum peak prominence in dBZ</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.average_spectra">
+<code class="descname">average_spectra</code><span class="sig-paren">(</span><em>t_avg</em>, <em>h_avg</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.average_spectra" title="Permalink to this definition">¶</a></dt>
+<dd><p>Average spectra in Peako.spec_data</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>t_avg</strong> – number of neighboring spectra each side in time dimension to average over</li>
+<li><strong>h_avg</strong> – number of neighboring spectra each side in range dimension to average over</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">avg_spec_list (list of xarray DataArrays having the same dimensions as DataArrays in Peako.spec_data,
+containing averaged spectra)</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.create_training_mask">
+<code class="descname">create_training_mask</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.create_training_mask" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find the entries in Peako.training_data that have values stored in them, i.e. the indices of spectra with
+user-marked peaks. Store this mask in Peako.marked_peaks_index.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.find_peaks_peako">
+<code class="descname">find_peaks_peako</code><span class="sig-paren">(</span><em>t_avg</em>, <em>h_avg</em>, <em>span</em>, <em>prom</em>, <em>wth</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.find_peaks_peako" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.find_peaks_peaktree">
+<code class="descname">find_peaks_peaktree</code><span class="sig-paren">(</span><em>prom</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.find_peaks_peaktree" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.fun_to_minimize">
+<code class="descname">fun_to_minimize</code><span class="sig-paren">(</span><em>parameters</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.fun_to_minimize" title="Permalink to this definition">¶</a></dt>
+<dd><p>Function which is minimized by the optimization toolkit (differential evolution).
+It averages the neighbor spectra in a range defined by t_avg and h_avg,
+calls smooth_spectrum with the defined method (Peako.smoothing_method),
+and calls get_peaks using the defined prominence and width. The t_avg, h_avg, span, width and prominence
+parameters are passed as parameters:</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>parameters</strong> – list containing t_avg, h_avg, span, width and prominence. If this function is called within</td>
+</tr>
+</tbody>
+</table>
+<p>scipy.differential_evolution, this corresponds to the order of the elements in “bounds”
+:return: res: Result (negative similarity measure based on area below peaks); negative because optimization
+toolkits usually search for the minimum.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.get_peaks">
+<code class="descname">get_peaks</code><span class="sig-paren">(</span><em>spectra</em>, <em>prom</em>, <em>width_thresh</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.get_peaks" title="Permalink to this definition">¶</a></dt>
+<dd><p>detect peaks in (smoothed) spectra which fulfill minimum prominence and width criteria.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>spectra</strong> – list of data arrays containing (smoothed) spectra in linear units</li>
+<li><strong>prom</strong> – minimum prominence in dbZ</li>
+<li><strong>width_thresh</strong> – width threshold in m/s</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">peaks: list of data arrays containing detected peak indices. Length of this list is the same as the</p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>length of the spectra (input parameter) list.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.plot_3d_plots">
+<code class="descname">plot_3d_plots</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.plot_3d_plots" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generates 4 panels of 3D plots of parameter vs. parameter vs. similarity for evaluating the training of pyPEAKO
+by eye</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>key</strong> – dictionary key in Peako.training_result for which to make the 3D plots, either ‘loop’ or ‘scipy’.</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body">fig, ax : matplotlib.pyplot figure and axes</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.plot_user_algorithm_spectrum">
+<code class="descname">plot_user_algorithm_spectrum</code><span class="sig-paren">(</span><em>**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.plot_user_algorithm_spectrum" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.smooth_spectra">
+<code class="descname">smooth_spectra</code><span class="sig-paren">(</span><em>spectra</em>, <em>span</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.smooth_spectra" title="Permalink to this definition">¶</a></dt>
+<dd><p>smooth an array of spectra. ‘loess’ and ‘lowess’ methods apply a Savitzky-Golay filter to an array.
+Refer to scipy.signal.savgol_filter for documentation on the 1-d filter. ‘loess’ means that polynomial is
+degree 2; lowess means polynomial is degree 1.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>spectra</strong> – list of Datasets of spectra</li>
+<li><strong>span</strong> – span used for loess/ lowess smoothing</li>
+<li><strong>velbins</strong> – Doppler velocity bins in m/s</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">spectra_out, an array with same dimensions as spectra containing the smoothed spectra</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.train_peako">
+<code class="descname">train_peako</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.train_peako" title="Permalink to this definition">¶</a></dt>
+<dd><p>Train the peak finding algorithm.
+Depending on Peako.optimization_method, looping over possible parameter combinations or an optimization toolkit
+is used to find the combination of time and height averaging, smoothing span, minimum peak width and minimum
+peak prominence which yields the largest similarity between user-found and algorithm-detected peaks.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.Peako.training_stats">
+<code class="descname">training_stats</code><span class="sig-paren">(</span><em>make_3d_plots=False</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.Peako.training_stats" title="Permalink to this definition">¶</a></dt>
+<dd><p>print out training statistics
+:param make_3d_plots: bool: Default is False. If set to True, plot_3d_plots will be called</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="peako.TrainingData">
+<em class="property">class </em><code class="descclassname">peako.</code><code class="descname">TrainingData</code><span class="sig-paren">(</span><em>specfiles_in, num_spec=[30], max_peaks=5</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="method">
+<dt id="peako.TrainingData.add_spectrafile">
+<code class="descname">add_spectrafile</code><span class="sig-paren">(</span><em>specfile</em>, <em>num_spec=30</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.add_spectrafile" title="Permalink to this definition">¶</a></dt>
+<dd><blockquote>
+<div>Open another netcdf file and add it to the list of TrainingData.spec_data</div></blockquote>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>specfile</strong> – (str)  spectra netcdf file to add the list of training data</li>
+<li><strong>num_spec</strong> – (int)  number of spectra to mark by the user (default is 30)</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.TrainingData.chirps_to_ranges">
+<code class="descname">chirps_to_ranges</code><span class="sig-paren">(</span><em>f</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.chirps_to_ranges" title="Permalink to this definition">¶</a></dt>
+<dd><p>extract a list of range indices from the range variables of all chirps
+:param f:  index of the file in TrainingData.spec_data
+:return: a list [0, len(C1Range), len(C1Range) + len(C2Range), …]</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.TrainingData.input_peak_locations">
+<code class="descname">input_peak_locations</code><span class="sig-paren">(</span><em>n_file</em>, <em>t_index</em>, <em>r_index</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.input_peak_locations" title="Permalink to this definition">¶</a></dt>
+<dd><table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>n_file</strong> – the index of the netcdf file from which to mark spectrum by hand</li>
+<li><strong>t_index</strong> – the time index of the spectrum</li>
+<li><strong>r_index</strong> – the range index of the spectrum</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name" colspan="2">Return peakVals:</th></tr>
+<tr class="field-even field"><td>&#160;</td><td class="field-body"><p class="first">The x values (in units of Doppler velocity) of the marked peaks</p>
+</td>
+</tr>
+<tr class="field-odd field"><th class="field-name" colspan="2">Return peakPowers:</th></tr>
+<tr class="field-odd field"><td>&#160;</td><td class="field-body"><p class="first last">The y values (in units of dBZ) of the marked peaks</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.TrainingData.mark_random_spectra">
+<code class="descname">mark_random_spectra</code><span class="sig-paren">(</span><em>**kwargs</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.mark_random_spectra" title="Permalink to this definition">¶</a></dt>
+<dd><p>Mark random spectra in TrainingData.spec_data (number of randomly drawn spectra in time-height space defined by
+TrainingData.num_spec) and save x and y locations
+:param kwargs:</p>
+<blockquote>
+<div>num_spec: update TrainingData.num_spec</div></blockquote>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.TrainingData.save_training_data">
+<code class="descname">save_training_data</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.save_training_data" title="Permalink to this definition">¶</a></dt>
+<dd><p>save the marked peaks stored in TrainingData.training_data_out to a netcdf file.
+If the netcdf file does not exist yet, create it in place where spectra netcdf are stored.
+If the netcdf file does exist already, read it in, modify it and overwrite the file.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="peako.TrainingData.update_dimensions">
+<code class="descname">update_dimensions</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#peako.TrainingData.update_dimensions" title="Permalink to this definition">¶</a></dt>
+<dd><p>update the list of time and range dimensions stored in TrainingData.tdim and TrainingData.rdim
+update arrays in which found peaks are stored
+also update the names of the netcdf files into which found peaks are stored</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.area_above_floor">
+<code class="descclassname">peako.</code><code class="descname">area_above_floor</code><span class="sig-paren">(</span><em>left_edge</em>, <em>right_edge</em>, <em>spectrum</em>, <em>noise_floor</em>, <em>velbins</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.area_above_floor" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="function">
+<dt id="peako.argnearest">
+<code class="descclassname">peako.</code><code class="descname">argnearest</code><span class="sig-paren">(</span><em>array</em>, <em>value</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.argnearest" title="Permalink to this definition">¶</a></dt>
+<dd><p>larda function to find the index of the nearest value in a sorted array
+for example time or range axis</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>array</strong> – sorted numpy array with values, list will be converted to 1D array</li>
+<li><strong>value</strong> – value to find</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">index</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.compute_overlapping_area">
+<code class="descclassname">peako.</code><code class="descname">compute_overlapping_area</code><span class="sig-paren">(</span><em>i1</em>, <em>i2</em>, <em>edge_list_1</em>, <em>edge_list_2</em>, <em>spectrum</em>, <em>noise_floor</em>, <em>velbins</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.compute_overlapping_area" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute overlapping area of two peaks defined by their edge indices in a radar Doppler spectrum</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first last simple">
+<li><strong>i1</strong> – </li>
+<li><strong>i2</strong> – </li>
+<li><strong>edge_list_1</strong> – </li>
+<li><strong>edge_list_2</strong> – </li>
+<li><strong>spectrum</strong> – </li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.find_edges">
+<code class="descclassname">peako.</code><code class="descname">find_edges</code><span class="sig-paren">(</span><em>spectrum</em>, <em>fill_value</em>, <em>peak_locations</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.find_edges" title="Permalink to this definition">¶</a></dt>
+<dd><p>Find the indices of left and right edges of peaks in a spectrum</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>spectrum</strong> – a single spectrum in linear units</li>
+<li><strong>peak_locations</strong> – indices of peaks detected for this spectrum</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">left_edges: list of indices of left edges,
+right_edges: list of indices of right edges</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.format_hms">
+<code class="descclassname">peako.</code><code class="descname">format_hms</code><span class="sig-paren">(</span><em>unixtime</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.format_hms" title="Permalink to this definition">¶</a></dt>
+<dd><p>format time stamp in seconds since 01.01.1970 00:00 UTC to HH:MM:SS</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.lin2z">
+<code class="descclassname">peako.</code><code class="descname">lin2z</code><span class="sig-paren">(</span><em>array</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.lin2z" title="Permalink to this definition">¶</a></dt>
+<dd><p>convert linear values to dB (for np.array or single number)</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.overlapping_area">
+<code class="descclassname">peako.</code><code class="descname">overlapping_area</code><span class="sig-paren">(</span><em>edge_list_1</em>, <em>edge_list_2</em>, <em>spectrum</em>, <em>noise_floor</em>, <em>velbins</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.overlapping_area" title="Permalink to this definition">¶</a></dt>
+<dd><p>Compute maximum overlapping area of hand-marked peaks  and algorithm-detected peaks
+in a radar Doppler spectrum
+:param edge_list_1: indices of peak edges of either user marked peaks or algorithm found peaks
+:param edge_list_2: indices of peak edges of the other peaks
+:param spectrum: ndarray containing reflectivity in dB units, contains nan values
+:param noise_floor: value of noise floor
+:param velbins: ndarray of same length as spectrum, from -Nyquist to +Nyquist Doppler velocity (m/s)</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.peak_width">
+<code class="descclassname">peako.</code><code class="descname">peak_width</code><span class="sig-paren">(</span><em>spectrum</em>, <em>pks</em>, <em>left_edge</em>, <em>right_edge</em>, <em>rel_height=0.5</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.peak_width" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates the width (at half height) of each peak in a signal. Returns a four arrays, width, width_height,
+left and right position (edge)</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>spectrum</strong> – 1-D ndarray, input signal</li>
+<li><strong>pks</strong> – 1-D ndarray, indices of the peak locations (output of scipy.signal.find_peaks)</li>
+<li><strong>left_edge</strong> – 1-D ndarray, indices of the left edges of each peak (output of functions_optimize.find_edges)</li>
+<li><strong>right_edge</strong> – 1-D ndarray, indices of the right edges of each peak (output of functions_optimize.find_edges)</li>
+<li><strong>rel_height</strong> – float, at which relative height compared to the peak height the width should be computed</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last">width: array containing the width in # of Doppler bins</p>
+</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.round_to_odd">
+<code class="descclassname">peako.</code><code class="descname">round_to_odd</code><span class="sig-paren">(</span><em>f</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.round_to_odd" title="Permalink to this definition">¶</a></dt>
+<dd><p>round to odd number</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="peako.vel_to_ind">
+<code class="descclassname">peako.</code><code class="descname">vel_to_ind</code><span class="sig-paren">(</span><em>velocities</em>, <em>velbins</em>, <em>fill_value</em><span class="sig-paren">)</span><a class="headerlink" href="#peako.vel_to_ind" title="Permalink to this definition">¶</a></dt>
+<dd><table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><ul class="first simple">
+<li><strong>velocities</strong> – list of Doppler velocities</li>
+<li><strong>velbins</strong> – Doppler velocity bins</li>
+<li><strong>fill_value</strong> – value to be ignored in velocities list</li>
+</ul>
+</td>
+</tr>
+<tr class="field-even field"><th class="field-name">Returns:</th><td class="field-body"><p class="first last"></p>
+</td>
+</tr>
+</tbody>
+</table>
+<p>indices of closest match for each element of velocities in velbins</p>
+</dd></dl>
+
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">pypeako</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<p class="caption"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../overview.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../guide.html">How to use pyPEAKO</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Teresa Vogl.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.8.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/source/peako.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
