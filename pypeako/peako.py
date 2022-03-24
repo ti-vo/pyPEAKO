@@ -10,8 +10,10 @@ from scipy.optimize import differential_evolution
 import random
 import matplotlib
 import matplotlib.pyplot as plt
+from loess import loess_1d
 from pypeako import utils
 from sklearn.model_selection import KFold
+from statsmodels.nonparametric import smoothers_lowess
 
 
 def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
@@ -269,7 +271,7 @@ def set_xticks_and_xlabels(ax, time_extend):
     return ax
 
 
-def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectra=False, smoothing_method='loess',
+def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectra=False, polyorder=2,
                           max_peaks=5, fill_value=-999.0, **kwargs):
     """
     Average, smooth spectra and detect peaks that fulfill prominence and width criteria.
@@ -281,14 +283,14 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
     :param width: minimum peak width in m/s Doppler velocity (width at half-height).
     :param prom: minimum peak prominence in dBZ.
     :param all_spectra: Bool. True if peaks in all spectra should be detected.
-    :param smoothing_method: defaults to loess smoothing
+    :param polyorder: defaults to smoothing using a polynomial order 2
     :param max_peaks: maximum number of peaks which can be detected. Defaults to 5
     :param fill_value: defaults to -999.0
     :param kwargs: 'marked_peaks_index', 'verbosity'
     :return: peaks: The detected peaks (list of datasets)
     """
     avg_spec = average_spectra(spec_data, t_avg, h_avg, **kwargs)
-    smoothed_spectra = smooth_spectra(avg_spec, spec_data, span=span, method=smoothing_method, **kwargs)
+    smoothed_spectra = smooth_spectra(avg_spec, spec_data, span=span, polyorder=polyorder, **kwargs)
     peaks = get_peaks(smoothed_spectra, spec_data, prom, width, all_spectra=all_spectra, max_peaks=max_peaks,
                       fill_value=fill_value, **kwargs)
     return peaks
@@ -348,19 +350,20 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     return avg_specs_list
 
 
-def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
+def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
     """
-    smooth an array of spectra. 'loess' and 'lowess' methods apply a Savitzky-Golay filter to an array.
+    smooth an array of spectra by applying a Savitzky-Golay filter to an array.
     Refer to scipy.signal.savgol_filter for documentation about the 1-d filter. 'loess' means that polynomial is
     degree 2; lowess means polynomial is degree 1.
     :param averaged_spectra: list of Datasets of spectra, linear units
     :param spec_data:
-    :param span: span (m/s) used for loess/ lowess smoothing
-    :param method: method used for smoothing (loess or lowess)
+    :param span: window size (m/s) used to fit the function smoothing
+    :param polyorder: degree of the polynomial fit to the data during smoothing
     :param kwargs: 'verbosity'
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
-    print(f'smoothing using {method}...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+    print(f'smoothing using polynomial of degree {polyorder}...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 \
+        else None
     spectra_out = [i.copy(deep=True) for i in averaged_spectra]
     if span == 0.0:
         return spectra_out
@@ -371,18 +374,20 @@ def smooth_spectra(averaged_spectra, spec_data, span, method, **kwargs):
             window_length = utils.round_to_odd(span / utils.get_vel_resolution(velbins))
             print(f'chirp {c+1}, window length {window_length}, for span = {span} m/s') if \
                 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
-            spec_chunk = spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :]
+            spec_chunk = averaged_spectra[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :]
             nanmask = np.isnan(spec_chunk)
-            spec_chunk[nanmask] = 0.
+            # experimental: Fill with minimum value
+            min_vals = np.tile(np.nanmin(spec_chunk, axis=2)[:,:,np.newaxis], (1,1,spec_chunk.shape[2]))
+            spec_chunk[nanmask] = min_vals[nanmask]
             if window_length == 1:
                 pass
-            elif method == 'loess':
+            else:
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
-                    spec_chunk, window_length, polyorder=2, axis=2, mode='nearest')
-            elif method == 'lowess':
-                spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
-                   spec_chunk, window_length, polyorder=1, axis=2, mode='nearest')
-            spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
+                    spec_chunk, window_length, polyorder=polyorder, axis=2, mode='nearest')
+                # experimental: fill smoothed spectra "gaps" with raw spectrum values
+                gaps = (spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] <= 0.) & ~nanmask
+                spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][gaps] = spec_chunk[gaps]
+                #spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
     return spectra_out
 
 
@@ -490,7 +495,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
 
 class Peako(object):
     def __init__(self, training_data=[], optimization_method='loop',
-                 smoothing_method='loess', max_peaks=5, k=0, num_training_samples=None, verbosity=0, **kwargs):
+                 polyorder=2, max_peaks=5, k=0, num_training_samples=None, verbosity=0, **kwargs):
 
         """
         initialize a Peako object
@@ -499,8 +504,8 @@ class Peako(object):
         :param optimization_method: Either 'loop' or 'DE'. In case of 'loop' looping over different parameter
         combinations is performed in a brute-like way. Option 'DE' uses differential evolution toolkit to find
         optimal solution (expensive). Default is 'loop'.
-        :param smoothing_method: string specifying the method for smoothing spectra. Options are 'loess', 'lowess' (from
-        in scipy.signal). The default is 'loess' smoothing.
+        :param polyorder: integer specifying the order of the polynomial used for Savitzky Golay filtering (from
+        scipy.signal). The default is 2.
         :param max_peaks: integer, maximum number of peaks to be detected by the algorithm. Defaults to 5.
         :param k: integer specifying parameter "k" in k-fold cross-validation. If it's set to 0 (the default), the
         training data is not split. If it's different from 0, training data is split into k subsets (folds), where
@@ -520,7 +525,7 @@ class Peako(object):
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
         self.optimization_method = optimization_method
-        self.smoothing_method = smoothing_method
+        self.polyorder = polyorder
         self.marked_peaks_index = []
         self.validation_index = []
         self.max_peaks = max_peaks
@@ -660,7 +665,7 @@ class Peako(object):
                 val_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=result['t_avg'],
                                                       h_avg=result['h_avg'], span=result['span'],
                                                       width=result['width'], prom=result['prom'],
-                                                      smoothing_method=self.smoothing_method,
+                                                      polyorder = self.polyorder,
                                                       max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                       marked_peaks_index=self.validation_index[self.current_k],
                                                       verbosity=self.verbosity)
@@ -690,7 +695,7 @@ class Peako(object):
                     avg_spec = average_spectra(self.spec_data, t_avg=t_avg, h_avg=h_avg)
                     for k, span in enumerate(self.training_params['span']):
                         smoothed_spectra = smooth_spectra(avg_spec, self.spec_data, span=span,
-                                                          method=self.smoothing_method, verbosity=self.verbosity)
+                                                          polyorder=self.polyorder, verbosity=self.verbosity)
                         for l, wth in enumerate(self.training_params['width']):
                             for m, prom in enumerate(self.training_params['prom']):
                                 if self.verbosity > 0:
@@ -749,7 +754,7 @@ class Peako(object):
         """
         Function which is minimized by the optimization toolkit (differential evolution).
         It averages the neighbor spectra in a range defined by t_avg and h_avg,
-        calls smooth_spectrum with the defined method (Peako.smoothing_method),
+        calls smooth_spectrum with the defined polynomial (Peako.polyorder),
         and calls get_peaks using the defined prominence and width. The t_avg, h_avg, span, width and prominence
         parameters are passed as parameters:
 
@@ -766,7 +771,7 @@ class Peako(object):
         h_avg = np.int(round(h_avg))
 
         peako_peaks = average_smooth_detect(self.spec_data, t_avg=t_avg, h_avg=h_avg, span=span, width=width, prom=prom,
-                                            smoothing_method=self.smoothing_method, max_peaks=self.max_peaks,
+                                            polyorder=self.polyorder, max_peaks=self.max_peaks,
                                             fill_value=self.fill_value,
                                             marked_peaks_index=self.marked_peaks_index[self.current_k],
                                             verbosity=self.verbosity)
@@ -881,7 +886,7 @@ class Peako(object):
                         self.peako_peaks_training[j][k] = average_smooth_detect(self.spec_data, t_avg=int(t),
                                                                                 h_avg=int(h), span=s, width=w, prom=p,
                                                                                 all_spectra=True,
-                                                                                smoothing_method=self.smoothing_method,
+                                                                                polyorder=self.polyorder,
                                                                                 max_peaks=self.max_peaks,
                                                                                 fill_value=self.fill_value)
 
@@ -892,7 +897,7 @@ class Peako(object):
 
                         self.peako_peaks_training[j][k] = average_smooth_detect(self.spec_data, t_avg=int(t),
                                                                                 h_avg=int(h), span=s, width=w, prom=p,
-                                                                                smoothing_method=self.smoothing_method,
+                                                                                polyorder=self.polyorder,
                                                                                 max_peaks=self.max_peaks,
                                                                                 fill_value=self.fill_value,
                                                                                 all_spectra=True)
@@ -939,7 +944,7 @@ class Peako(object):
                 peako_peaks_test = average_smooth_detect(spec_data=self.spec_data_test, t_avg=t,
                                                          h_avg=h, span=s,
                                                          width=w, prom=p,
-                                                         smoothing_method=self.smoothing_method,
+                                                         polyorder=self.polyorder,
                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                          all_spectra=True,
                                                          #marked_peaks_index=self.marked_peaks_index_testing,
@@ -1083,7 +1088,7 @@ class Peako(object):
                     t, h, s, w, p = self.training_result[j][k][i_max, :-1]
                     avg_spectra = average_spectra(self.spec_data, int(t), int(h))
                     #avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
-                    smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.smoothing_method,
+                    smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.polyorder,
                                                       verbosity=self.verbosity)
                     smoothed_spectrum = smoothed_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
                     ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
@@ -1132,14 +1137,16 @@ class Peako(object):
         elif mode == 'manual':
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
             t, h, s, w, p = kwargs['peako_params']
+            m_p_i = [np.zeros(i.doppler_spectrum.shape[:2]) for i in self.spec_data]
+            m_p_i[file][time_index, range_index] = 1
             algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
-                                                    width=w, prom=p, smoothing_method=self.smoothing_method,
+                                                    width=w, prom=p, polyorder=self.polyorder,
                                                     fill_value=self.fill_value, max_peaks=self.max_peaks,
-                                                    all_spectra=True)
+                                                    all_spectra=False, marked_peaks_index=m_p_i)
 
         if plot_smoothed:
             avg_spectra = average_spectra(self.spec_data, t_avg=int(t), h_avg=int(h))
-            smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, span=s, method=self.smoothing_method)
+            smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, span=s, polyorder=self.polyorder)
 
         for t_i, h_i in list(zip(time_index, range_index)):
             c = np.digitize(h_i, utils.get_chirp_offsets(self.spec_data[file]))
@@ -1209,7 +1216,7 @@ class Peako(object):
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
             t, h, s, w, p = kwargs['peako_params']
             algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
-                                                                width=w, prom=p, smoothing_method=self.smoothing_method,
+                                                                width=w, prom=p, polyorder=self.polyorder,
                                                                 fill_value=self.fill_value, max_peaks=self.max_peaks,
                                                                 all_spectra=True, verbosity=self.verbosity)]}
             self.create_training_mask()
@@ -1338,8 +1345,9 @@ class TrainingData(object):
             xlim += [-1, +1]
             # if this spectrum is not empty, we plot 3x3 panels with shared x and y axes
             fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
-            fig.suptitle(f'Mark peaks in spectrum in center panel. Fig. {self.plot_count[n_file]+1} out of '
-                         f'{self.num_spec[n_file]}; File {n_file+1} of {len(self.spec_data)}')
+            fig.suptitle(f'Mark peaks in the center panel spectrum. Fig. {self.plot_count[n_file]+1} out of '
+                         f'{self.num_spec[n_file]}; File {n_file+1} of {len(self.spec_data)}', size='xx-large',
+                         fontweight='semibold')
             for dim1 in range(3):
                 for dim2 in range(3):
                     if not (dim1 == 1 and dim2 == 1):  # if this is not the center panel plot
@@ -1370,18 +1378,19 @@ class TrainingData(object):
                         ax[dim1, dim2].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
                         ax[dim1, dim2].grid(True)
 
-            ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values))
+            ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw')
             if plot_smoothed:
                 assert 'span' in kwargs, "span required for mark_random_spectra if plot_smoothed is True"
                 window_length = utils.round_to_odd(kwargs['span'] / utils.get_vel_resolution(velbins))
                 smoothed_spectrum = utils.lin2z(this_spectrum_center.values)
                 smoothed_spectrum[~np.isnan(smoothed_spectrum)] = scipy.signal.savgol_filter(
                     smoothed_spectrum[~np.isnan(smoothed_spectrum)], window_length, polyorder=2, mode='nearest')
-                ax[1, 1].plot(velbins, smoothed_spectrum)
+                ax[1, 1].plot(velbins, smoothed_spectrum, color='midnightblue', label='smoothed')
 
             ax[1, 1].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
             ax[1, 1].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
             ax[1, 1].grid(True)
+            ax[1, 1].legend()
 
             ax[1, 1].set_title(f'range:'
                                f'{np.round(self.spec_data[n_file]["range_layers"].values[int(heightindex_center)] / 1000, 2)} km,'

@@ -18,6 +18,7 @@ def lin2z(array):
     :return:
     """
     with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                 
         return 10 * np.log10(array)
 
 
