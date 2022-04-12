@@ -10,10 +10,8 @@ from scipy.optimize import differential_evolution
 import random
 import matplotlib
 import matplotlib.pyplot as plt
-from loess import loess_1d
 from pypeako import utils
 from sklearn.model_selection import KFold
-from statsmodels.nonparametric import smoothers_lowess
 
 
 def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
@@ -568,6 +566,13 @@ class Peako(object):
                 if spec_data:
                     self.spec_data[f].doppler_spectrum.values[:, c_ind==i, :] = np.nan
 
+    def get_training_sample_number(self):
+        """
+        return the number of samples used for training
+        """
+        return np.sum([np.sum(self.marked_peaks_index[self.current_k][f].values == 1)
+                       for f in range(len(self.spec_data))])
+
     def create_training_mask(self):
         """
         Find the entries in Peako.training_data that have values stored in them, i.e. the indices of spectra with
@@ -651,8 +656,7 @@ class Peako(object):
         self.create_training_mask()
         if not self.k_fold_cv:
             result = self.train_peako_inner()
-            print(f'number of samples: '
-                  f'{np.sum([np.sum(self.marked_peaks_index[self.current_k][f].values ==1) for f in range(len(self.spec_data))])}')
+            print(f'number of samples: {self.get_training_sample_number()}')
             return result
         else:
             # k is set, the result becomes a list

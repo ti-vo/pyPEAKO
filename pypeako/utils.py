@@ -18,8 +18,9 @@ def lin2z(array):
     :return:
     """
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")                 
-        return 10 * np.log10(array)
+        warnings.simplefilter("ignore")
+        out = 10 * np.log10(array)
+        return out
 
 
 def format_hms(unixtime):
