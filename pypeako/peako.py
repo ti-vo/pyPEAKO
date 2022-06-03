@@ -1336,6 +1336,9 @@ class TrainingData(object):
         # TODO replace with utils.get_chirp_offsets
         n_rg = self.spec_data[n_file]['chirp_start_indices']
         c_ind = np.digitize(r_index, n_rg)
+        if "chirp" in kwargs:
+            if not c_ind == kwargs['chirp']:
+                return np.nan, np.nan
         #print(f'range index {r_index} is in chirp {c_ind} with ranges in chirps {n_rg[1:]}')
 
         heightindex_center = r_index
@@ -1345,7 +1348,7 @@ class TrainingData(object):
         #print(f'time index center: {timeindex_center}, height index center: {heightindex_center}')
         if not np.sum(~np.isnan(this_spectrum_center.values)) < 2:
             velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
-            xlim = velbins.values[~np.isnan(this_spectrum_center.values)][[0, -1]]
+            xlim = velbins.values[~np.isnan(this_spectrum_center.values) & ~(this_spectrum_center.values == 0)][[0, -1]]
             xlim += [-1, +1]
             # if this spectrum is not empty, we plot 3x3 panels with shared x and y axes
             fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
@@ -1387,8 +1390,9 @@ class TrainingData(object):
                 assert 'span' in kwargs, "span required for mark_random_spectra if plot_smoothed is True"
                 window_length = utils.round_to_odd(kwargs['span'] / utils.get_vel_resolution(velbins))
                 smoothed_spectrum = utils.lin2z(this_spectrum_center.values)
-                smoothed_spectrum[~np.isnan(smoothed_spectrum)] = scipy.signal.savgol_filter(
-                    smoothed_spectrum[~np.isnan(smoothed_spectrum)], window_length, polyorder=2, mode='nearest')
+                if not window_length == 1:
+                    smoothed_spectrum[~np.isnan(smoothed_spectrum)] = scipy.signal.savgol_filter(
+                        smoothed_spectrum[~np.isnan(smoothed_spectrum)], window_length, polyorder=2, mode='nearest')
                 ax[1, 1].plot(velbins, smoothed_spectrum, color='midnightblue', label='smoothed')
 
             ax[1, 1].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
