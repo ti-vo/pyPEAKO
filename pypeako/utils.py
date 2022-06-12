@@ -1,5 +1,6 @@
 import numpy as np
 import datetime
+import xarray as xr
 import matplotlib
 import warnings
 
@@ -78,6 +79,21 @@ def mask_fill_values(spec_data: list):
                        spec_data[i].doppler_spectrum.values == spec_data._FillValue, np.nan)
         np.putmask(spec_data[i].doppler_spectrum.values,
                        spec_data[i].doppler_spectrum.values <= 1e-10, np.nan)
+    return spec_data
+
+
+def save_and_reload(spec_data, filenames):
+    """
+    Following optimization tip #2 (https://xarray.pydata.org/en/v0.9.2/dask.html) it is better to save intermediate
+    results to disk and then load them again
+    :param spec_data: list of xarray data arrays
+    :param filenames: list of strings (original files that were read in)
+    :return:
+    """
+    list_out = [f + 'temp' for f in filenames]
+    for s, f in zip(spec_data, list_out):
+        s.to_netcdf(f)
+    spec_data = [xr.open_dataset(l, mask_and_scale=True) for l in list_out]
     return spec_data
 
 

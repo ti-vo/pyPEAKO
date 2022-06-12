@@ -497,7 +497,7 @@ class Peako(object):
 
         """
         initialize a Peako object
-        :param training_data: list of strings (netcdf files to read in written by TrainingData.save_training_data,
+        :param training_data: list of strings (netcdf files to read in written by TrainingData.save_training_data, i.e.
         filenames starting with marked_peaks_...)
         :param optimization_method: Either 'loop' or 'DE'. In case of 'loop' looping over different parameter
         combinations is performed in a brute-like way. Option 'DE' uses differential evolution toolkit to find
@@ -522,6 +522,7 @@ class Peako(object):
         self.spec_data = [s.load() for s in self.spec_data]
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
+        self.spec_data = utils.save_and_reload(self.spec_data, self.specfiles)
         self.optimization_method = optimization_method
         self.polyorder = polyorder
         self.marked_peaks_index = []
@@ -1241,6 +1242,17 @@ class Peako(object):
             if len(self.plot_dir) > 0:
                 fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_user.png')
         return algorithm_peaks
+
+    def cleanup(self):
+        """
+        close all datasets and delete temporary files
+        :return:
+        """
+        for f in self.spec_data:
+            f.close()
+        temp_files = [f + 'temp' for f in self.specfiles]
+        for t in temp_files:
+            os.remove(t) if os.path.exists(t) else None
 
 
 class TrainingData(object):
