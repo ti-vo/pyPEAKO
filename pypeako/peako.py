@@ -999,7 +999,7 @@ class Peako(object):
         self.current_k = 0
         return maximum_similarity
 
-    def plot_3d_plots(self, key, k=0):
+    def plot_3d_plots(self, key='loop', k=0):
         """
         Generates 4 panels of 3D plots of parameter vs. parameter vs. similarity for evaluating the training by eye
 
