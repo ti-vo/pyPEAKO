@@ -1,5 +1,5 @@
 # pyPEAKO
-Teresa Vogl, Martin Radenz, Heike Kalesse 2022
+Teresa Vogl, Martin Radenz, Heike Kalesse-Los 2022
 
 **PEAKO** is a supervised radar Doppler spectrum peak finding algorithm. It finds the optimal 
 parameters for detecting peaks in cloud radar Doppler spectra using user-generated training data. 
