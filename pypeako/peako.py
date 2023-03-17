@@ -351,8 +351,7 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
 def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
     """
     smooth an array of spectra by applying a Savitzky-Golay filter to an array.
-    Refer to scipy.signal.savgol_filter for documentation about the 1-d filter. 'loess' means that polynomial is
-    degree 2; lowess means polynomial is degree 1.
+    Refer to scipy.signal.savgol_filter for documentation about the 1-d filter.
     :param averaged_spectra: list of Datasets of spectra, linear units
     :param spec_data:
     :param span: window size (m/s) used to fit the function smoothing
@@ -1163,7 +1162,9 @@ class Peako(object):
             spectrum = self.spec_data[file].doppler_spectrum.isel(time=t_i, range=h_i)
             ax.plot(velbins, utils.lin2z(spectrum), linestyle='-', linewidth=1, label='raw spectrum')
             if plot_smoothed:
+                averaged_spectrum = avg_spectra[file]['doppler_spectrum'].values[t_i, h_i, :]
                 smoothed_spectrum = smoothed_spectra[file]['doppler_spectrum'].values[t_i, h_i, :]
+                ax.plot(velbins, utils.lin2z(averaged_spectrum), linestyle='-', linewidth=0.7, label='averaged spectrum')
                 ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
 
             ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
@@ -1327,7 +1328,8 @@ class TrainingData(object):
             while s < self.num_spec[n]:
                 random_index_t = random.randint(1, self.tdim[n]-1)
                 random_index_r = random.randint(1, self.rdim[n]-1)
-                print(f'r: {random_index_r}, t: {random_index_t}')
+                if self.verbosity > 1:
+                    print(f'r: {random_index_r}, t: {random_index_t}')
                 vals, powers = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
                 if not np.all(np.isnan(vals)):
                     self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
