@@ -8,10 +8,14 @@ import copy
 import os
 from scipy.optimize import differential_evolution
 import random
+import queue
+import multiprocessing
+import multiprocessing.managers
 import matplotlib
 import matplotlib.pyplot as plt
 from pypeako import utils
 from sklearn.model_selection import KFold
+from multiprocessing import RawArray
 
 
 def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
@@ -179,7 +183,6 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
 
 
 def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
-
     """
 
     :param data: xarray.Dataset containing range, time and number of peaks
@@ -203,7 +206,7 @@ def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
     cbarformatter = plt.FuncFormatter(lambda val, loc: labels[val])
     labels = {0: '0', 1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
     pcmesh = ax.pcolormesh(matplotlib.dates.date2num(dt_list[:]),
-                           data['range'].values/1000, np.transpose(var), cmap=cmap, vmin=0.5, vmax=maxpeaks+0.5)
+                           data['range'].values / 1000, np.transpose(var), cmap=cmap, vmin=0.5, vmax=maxpeaks + 0.5)
 
     cbar = fig.colorbar(pcmesh, ticks=[1, 2, 3, 4, 5], format=cbarformatter)
     time_extend = dt_list[-1] - dt_list[0]
@@ -293,6 +296,38 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
                       fill_value=fill_value, **kwargs)
     return peaks
 
+def average_smooth_detect_mp(spec_data, h, t, spans, widths, proms, training_data, marked_peaks, fill_value,
+                             task_queue, counter):
+    # average spectra
+    avg_spec = average_spectra(spec_data, t, h)
+    # issue second level tasks
+#    for s in spans:
+#        task_queue.put((smooth_detect_similarity_mp, (avg_spec, spec_data, s, widths, proms, training_data, marked_peaks,
+#                                                      fill_value, task_queue, counter)))
+#        # increment the counter by the number of subtasks
+#        counter.increment()
+    # decrement the counter
+    counter.decrement()
+
+
+def smooth_detect_similarity_mp(avg_spec, spec_data, span, widths, proms, training_data, marked_peaks, fill_value,
+                                task_queue, counter):
+    # smooth spectra
+    smoothed_spec = smooth_spectra(avg_spec, spec_data, span, polyorder=2)
+    # issue third level tasks
+    for w, p in [(w, p) for w in widths for p in proms]:
+        task_queue.put((detect_get_similarity_mp, (smoothed_spec, spec_data, w, p,
+                                                   training_data, marked_peaks, fill_value, task_queue, counter)))
+        # increment the counter by the number of subtasks
+        counter.increment()
+    # decrement the counter
+    counter.decrement()
+
+def detect_get_similarity_mp(smoothed_spec, spec_data, width, prom, training_data, marked_peaks, fill_value, task_queue,
+                             counter):
+    peaks = get_peaks(smoothed_spec, spec_data, prom, width, all_spectra=True, max_peaks=5, fill_value=fill_value)
+    similarity = compute_similarity(spec_data, training_data, marked_peaks, peaks, fill_value, array_out=False)
+    counter.decrement()
 
 def average_single_bin(specdata_values: np.array, B: np.array, doppler_bin: int, range_offsets: list):
     """
@@ -307,7 +342,7 @@ def average_single_bin(specdata_values: np.array, B: np.array, doppler_bin: int,
     C = []
     r_ind = np.hstack((range_offsets, specdata_values.shape[1]))
     for c in range(len(r_ind) - 1):
-        A = specdata_values[:, r_ind[c]:r_ind[c+1], doppler_bin]
+        A = specdata_values[:, r_ind[c]:r_ind[c + 1], doppler_bin]
         C.append(si.convolve2d(A, B, 'same'))
     C = np.hstack(C)
     return C
@@ -336,7 +371,7 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
         if t_avg == 0 and h_avg == 0:
             avg_specs['doppler_spectrum'][:, :, :] = spec_data[f]['doppler_spectrum'].values[:, :, :]
         else:
-            B = np.ones((1+t_avg*2, 1+h_avg*2))/((1+t_avg*2) * (1+h_avg*2))
+            B = np.ones((1 + t_avg * 2, 1 + h_avg * 2)) / ((1 + t_avg * 2) * (1 + h_avg * 2))
             print(f'matrix B for convolution is {B}') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
             range_offsets = spec_data[f].chirp_start_indices.values
             for d in range(avg_specs['doppler_spectrum'].values.shape[2]):
@@ -369,12 +404,12 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
             r_ind = utils.get_chirp_offsets(spec_data[f])[c:c + 2]
             velbins = spec_data[f]['velocity_vectors'].values[c, :]
             window_length = utils.round_to_odd(span / utils.get_vel_resolution(velbins))
-            print(f'chirp {c+1}, window length {window_length}, for span = {span} m/s') if \
+            print(f'chirp {c + 1}, window length {window_length}, for span = {span} m/s') if \
                 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
             spec_chunk = averaged_spectra[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :]
             nanmask = np.isnan(spec_chunk)
             # experimental: Fill with minimum value
-            min_vals = np.tile(np.nanmin(spec_chunk, axis=2)[:,:,np.newaxis], (1,1,spec_chunk.shape[2]))
+            min_vals = np.tile(np.nanmin(spec_chunk, axis=2)[:, :, np.newaxis], (1, 1, spec_chunk.shape[2]))
             spec_chunk[nanmask] = min_vals[nanmask]
             if window_length == 1:
                 pass
@@ -384,7 +419,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
                 # experimental: fill smoothed spectra "gaps" with raw spectrum values
                 gaps = (spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] <= 0.) & ~nanmask
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][gaps] = spec_chunk[gaps]
-                #spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
+                # spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
     return spectra_out
 
 
@@ -412,7 +447,7 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
             coords=[spectra[f]['time'], spectra[f]['range'],
                     xr.DataArray(range(max_peaks))])})
         for c in range(len(spectra[f].chirp)):
-            width_thresh = width_thresh/np.nanmedian(np.diff(spec_data[f]['velocity_vectors'].values[c, :]))
+            width_thresh = width_thresh / np.nanmedian(np.diff(spec_data[f]['velocity_vectors'].values[c, :]))
 
             r_ind = utils.get_chirp_offsets(spec_data[f])[c:c + 2]
             if all_spectra:
@@ -431,7 +466,9 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
                 if len(h_ind) > 0:
                     peaks_marked_spectra = xr.apply_ufunc(peak_detection_dask,
                                                           spectra[f].doppler_spectrum.isel(time=xr.DataArray(t_ind),
-                                                                    range=xr.DataArray(h_ind)).values[np.newaxis, :, :],
+                                                                                           range=xr.DataArray(
+                                                                                               h_ind)).values[
+                                                          np.newaxis, :, :],
                                                           prom, fill_value, width_thresh, max_peaks)
                     for i, j in enumerate(zip(t_ind, h_ind)):
                         t, h = j
@@ -456,29 +493,103 @@ def peak_detection_dask(spectra_array, prom, fill_value, width_thresh, max_peaks
     :return:
     """
     spectra_db = utils.lin2z(spectra_array)
-    fillvalue = -100. #np.ma.filled(np.nanmin(spectra_db, axis=2)[:, :, np.newaxis], -100.)
+    fillvalue = -100.  # np.ma.filled(np.nanmin(spectra_db, axis=2)[:, :, np.newaxis], -100.)
     spectra_db[np.isnan(spectra_db)] = fillvalue
     out = np.empty_like(spectra_db)
     for tt in range(spectra_db.shape[0]):
         for rr in range(spectra_db.shape[1]):
-            out[tt, rr, :] = detect_single_spectrum(spectra_db[tt, rr, :], -100, #fillvalue[tt, rr, 0],
+            out[tt, rr, :] = detect_single_spectrum(spectra_db[tt, rr, :], -100,  # fillvalue[tt, rr, 0],
                                                     prom, width_thresh, max_peaks)
     return out
 
 
-def peak_detection_multiprocessing(spectra, prom, fill_value, width_thresh, max_peaks, th_ind):
-    t, h = th_ind
-    spectrum = spectra[t, h, :]
-    spectrum = utils.lin2z(spectrum)
-    #spectrum.data[spectrum.mask] = np.nanmin(spectrum)
-    spectrum = spectrum.data
-    locs = detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks)
-    locs = locs[0:max_peaks]
-    return locs
+def compute_similarity(s_data, t_data, marked_peaks, algorithm_peaks, fill_value, array_out=False):
+    """
+    Compute the similarity measure for a set of hand-marked and algorithm peaks
+    :param s_data: spectra data
+    :param t_data: training data
+    :param marked_peaks:
+    :param algorithm_peaks:
+    :param fill_value:
+    :param array_out:
+    :return:
+    """
+    sim_out = [] if array_out else 0
+    for f in range(len(s_data)):
+        bins_per_chirp = np.diff(np.hstack(
+            (s_data[f].chirp_start_indices.values, s_data[f].n_range_layers.values)))
+        velbins_per_bin = (np.repeat(s_data[f]['velocity_vectors'].values,
+                                     [int(b) for b in bins_per_chirp], axis=0))
+        t_ind, h_ind = np.where(marked_peaks[f] == 1)
+        for h, t in zip(h_ind, t_ind):
+            user_peaks = t_data[f]['peaks'].values[t, h, :]
+            user_peaks = np.unique(user_peaks[~np.isnan(user_peaks)])
+            # convert velocities to indices
+            user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
+            spectrum = s_data[f]['doppler_spectrum'].values[t, h, :]
+            spectrum_db = utils.lin2z(spectrum)
+            spectrum_db[np.isnan(spectrum_db)] = 0.0
+            spectrum_db[spectrum == fill_value] = 0.0
+            user_peaks.sort()
+            peako_peaks = algorithm_peaks[f]['PeakoPeaks'].values[t, h, :]
+            peako_peaks = np.unique(peako_peaks[peako_peaks > 0])
+            peako_peaks.sort()
+            le_user_peaks, re_user_peaks = find_edges(spectrum, fill_value, user_peaks)
+            le_alg_peaks, re_alg_peaks = find_edges(spectrum, fill_value, peako_peaks)
+            similarity = 0
+            overlap_area = math.inf
+            while (len(peako_peaks) > 0) & (len(user_peaks) > 0) & (overlap_area > 0):
+                # compute maximum overlapping area
+                user_ind, alg_ind, overlap_area = overlapping_area([le_user_peaks, re_user_peaks],
+                                                                   [le_alg_peaks, re_alg_peaks],
+                                                                   spectrum_db, np.nanmin(spectrum_db),
+                                                                   velbins_per_bin[h])
+                similarity = similarity + overlap_area
+                if user_ind is not None:
+                    user_peaks = np.delete(user_peaks, user_ind)
+                    le_user_peaks = np.delete(le_user_peaks, user_ind)
+                    re_user_peaks = np.delete(re_user_peaks, user_ind)
+                if alg_ind is not None:
+                    peako_peaks = np.delete(peako_peaks, alg_ind)
+                    le_alg_peaks = np.delete(le_alg_peaks, alg_ind)
+                    re_alg_peaks = np.delete(re_alg_peaks, alg_ind)
+
+            # Subtract area of non-overlapping regions
+            for i in range(len(le_alg_peaks)):
+                similarity = similarity - area_above_floor(le_alg_peaks[i], re_alg_peaks[i], spectrum_db,
+                                                           np.nanmin(spectrum_db), velbins_per_bin[h])
+            for i in range(len(le_user_peaks)):
+                similarity = similarity - area_above_floor(le_user_peaks[i], re_user_peaks[i], spectrum_db,
+                                                           np.nanmin(spectrum_db), velbins_per_bin[h])
+
+            if not array_out:
+                sim_out += similarity
+    return sim_out
+
+class SafeCounter:
+    def __init__(self, count):
+        self._lock = multiprocessing.Lock()
+        self._value = count
+
+    def is_zero(self):
+        with self._lock:
+            return self._value == 0
+
+    def increment(self, value=1):
+        with self._lock:
+            self._value += value
+
+    def decrement(self, value=1):
+        with self._lock:
+            self._value -= value
+
+
+class CustomManager(multiprocessing.managers.BaseManager):
+    # nothing
+    pass
 
 
 def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
-
     # call scipy.signal.find_peaks to detect peaks in the (logarithmic) spectrum
     # it is important that nan values are not included in the spectrum passed to si
     locs, _ = si.find_peaks(spectrum, prominence=prom, width=width_thresh)
@@ -522,6 +633,7 @@ class Peako(object):
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
         self.spec_data = utils.save_and_reload(self.spec_data, self.specfiles)
+        #self.cleanup()
         self.optimization_method = optimization_method
         self.polyorder = polyorder
         self.marked_peaks_index = []
@@ -536,10 +648,10 @@ class Peako(object):
             {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.2, 0.05),
              'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
         self.training_result = {'loop': [np.empty((1, 6))], 'DE': [np.empty((1, 6))]} if not self.k_fold_cv else {
-            'loop': [np.empty((1, 6))]*self.k, 'DE': [np.empty((1, 6))]*self.k}
+            'loop': [np.empty((1, 6))] * self.k, 'DE': [np.empty((1, 6))] * self.k}
         self.validation_result = {'loop': [np.empty(1)], 'DE': [np.empty(1)]} if not self.k_fold_cv else {
             'loop': [np.empty(1)] * self.k, 'DE': [np.empty(1)] * self.k}
-        self.peako_peaks_training = {'loop': [[] for _ in range(self.k+1)], 'DE': [[] for _ in range(self.k+1)]}
+        self.peako_peaks_training = {'loop': [[] for _ in range(self.k + 1)], 'DE': [[] for _ in range(self.k + 1)]}
         self.peako_peaks_testing = {'loop': [], 'DE': []}
         self.testing_files = []
         self.testing_data = []
@@ -562,9 +674,9 @@ class Peako(object):
             chirp_offsets = utils.get_chirp_offsets(self.spec_data[f])
             c_ind = np.repeat(self.training_data[f].chirp.values, np.diff(chirp_offsets))
             for i in chirp_index:
-                self.training_data[f].peaks[:, c_ind==i, :] = np.nan
+                self.training_data[f].peaks[:, c_ind == i, :] = np.nan
                 if spec_data:
-                    self.spec_data[f].doppler_spectrum.values[:, c_ind==i, :] = np.nan
+                    self.spec_data[f].doppler_spectrum.values[:, c_ind == i, :] = np.nan
 
     def get_training_sample_number(self):
         """
@@ -580,7 +692,7 @@ class Peako(object):
         """
         index_testing = []
         for e in range(len(self.testing_data)):
-            index_testing.append(xr.DataArray(~np.isnan(self.testing_data[e]['peaks'].values[:, :, 0])*1,
+            index_testing.append(xr.DataArray(~np.isnan(self.testing_data[e]['peaks'].values[:, :, 0]) * 1,
                                               dims=['time', 'range']))
         self.marked_peaks_index_testing = index_testing
 
@@ -608,8 +720,8 @@ class Peako(object):
                 cropped_training_mask = copy.deepcopy(empty_training_mask)
                 for f in range(len(index_training)):
                     i_1, left_bound = utils.find_index_in_sublist(index_training[f], training_index)
-                    cropped_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
-                                                      training_index[i_1][1][index_training[f]-left_bound]] = 1
+                    cropped_training_mask[i_1].values[training_index[i_1][0][index_training[f] - left_bound],
+                                                      training_index[i_1][1][index_training[f] - left_bound]] = 1
                 self.marked_peaks_index = [cropped_training_mask]
 
             else:
@@ -635,18 +747,17 @@ class Peako(object):
 
                     for f in range(len(index_training)):
                         i_1, left_bound = utils.find_index_in_sublist(index_training[f], training_index)
-                        this_training_mask[i_1].values[training_index[i_1][0][index_training[f]-left_bound],
-                                                       training_index[i_1][1][index_training[f]-left_bound]] = 1
+                        this_training_mask[i_1].values[training_index[i_1][0][index_training[f] - left_bound],
+                                                       training_index[i_1][1][index_training[f] - left_bound]] = 1
                     marked_peaks_index.append(this_training_mask)
 
                     for f in range(len(index_validation)):
                         i_1, left_bound = utils.find_index_in_sublist(index_validation[f], training_index)
-                        this_validation_mask[i_1].values[training_index[i_1][0][index_validation[f]-left_bound],
-                                                         training_index[i_1][1][index_validation[f]-left_bound]] = 1
+                        this_validation_mask[i_1].values[training_index[i_1][0][index_validation[f] - left_bound],
+                                                         training_index[i_1][1][index_validation[f] - left_bound]] = 1
                     validation_index.append(this_validation_mask)
                 self.validation_index = validation_index
                 self.marked_peaks_index = marked_peaks_index
-
 
     def train_peako(self):
         """
@@ -667,18 +778,18 @@ class Peako(object):
                 result = self.train_peako_inner()['training result'][0]
 
                 val_peaks = average_smooth_detect(spec_data=self.spec_data, t_avg=result['t_avg'],
-                                                      h_avg=result['h_avg'], span=result['span'],
-                                                      width=result['width'], prom=result['prom'],
-                                                      polyorder = self.polyorder,
-                                                      max_peaks=self.max_peaks, fill_value=self.fill_value,
-                                                      marked_peaks_index=self.validation_index[self.current_k],
-                                                      verbosity=self.verbosity)
+                                                  h_avg=result['h_avg'], span=result['span'],
+                                                  width=result['width'], prom=result['prom'],
+                                                  polyorder=self.polyorder,
+                                                  max_peaks=self.max_peaks, fill_value=self.fill_value,
+                                                  marked_peaks_index=self.validation_index[self.current_k],
+                                                  verbosity=self.verbosity)
                 similarity = self.area_peaks_similarity(val_peaks, array_out=False, mode='validation')
                 result['validation_result'] = {'similarity': similarity, 'maximum similarity': max_sim[self.current_k]}
                 self.validation_result[self.optimization_method][k] = similarity
                 result_list_out.append(result)
                 if self.verbosity > 0:
-                    print(f'validation similarity k={k}: {round(similarity/max_sim[self.current_k]*100, 2)}%')
+                    print(f'validation similarity k={k}: {round(similarity / max_sim[self.current_k] * 100, 2)}%')
                 self.current_k += 1
             self.current_k = 0
             return result_list_out
@@ -709,10 +820,15 @@ class Peako(object):
                                                         max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                         verbosity=self.verbosity,
                                                         marked_peaks_index=self.marked_peaks_index[self.current_k])
-                                similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
+                                similarity = compute_similarity(self.spec_data, self.training_data,
+                                                                self.marked_peaks_index[self.current_k], peako_peaks,
+                                                                self.fill_value)
+                                #similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
                                 similarity_array[i, j, k, l, m] = similarity
                                 self.training_result['loop'][self.current_k] = np.append(self.training_result['loop'][
-                                                                                             self.current_k], [[t_avg, h_avg, span, wth, prom, similarity]],
+                                                                                             self.current_k], [
+                                                                                             [t_avg, h_avg, span, wth,
+                                                                                              prom, similarity]],
                                                                                          axis=0)
                                 if self.verbosity > 0:
                                     print(f"similarity: {similarity}, t:{t_avg}, h:{h_avg}, span:{span}, width:{wth}, "
@@ -725,13 +841,48 @@ class Peako(object):
             # extract the parameter combination yielding the maximum in similarity
             t, h, s, w, p = np.unravel_index(np.argsort(similarity_array, axis=None)[-3:][::-1], similarity_array.shape)
             return {'training result': [{'t_avg': self.training_params['t_avg'][ti],
-                    'h_avg': self.training_params['h_avg'][hi],
-                    'span': self.training_params['span'][si],
-                    'width': self.training_params['width'][wi],
-                    'prom': self.training_params['prom'][pi],
-                    'similarity': np.sort(similarity_array, axis=None)[-(i+1)]}
-                    for i, (ti, hi, si, wi, pi) in enumerate(zip(t, h, s, w, p))]}
+                                         'h_avg': self.training_params['h_avg'][hi],
+                                         'span': self.training_params['span'][si],
+                                         'width': self.training_params['width'][wi],
+                                         'prom': self.training_params['prom'][pi],
+                                         'similarity': np.sort(similarity_array, axis=None)[-(i + 1)]}
+                                        for i, (ti, hi, si, wi, pi) in enumerate(zip(t, h, s, w, p))]}
 
+
+        elif self.optimization_method == 'multiprocessing':
+            CustomManager.register("SafeCounter", SafeCounter)
+            CustomManager.register("Queue", multiprocessing.Queue)
+            spec_data = [s['doppler_spectrum'].load() for s in self.spec_data]
+            training_data = [t.load() for t in self.training_data]
+            marked_peaks = self.marked_peaks_index[self.current_k]
+            t_avg = self.training_params['t_avg']
+            h_avg = self.training_params['h_avg']
+            spans = self.training_params['span']
+            widths = self.training_params['width']
+            proms = self.training_params['prom']
+
+            with CustomManager() as manager:
+                task_queue = manager.Queue
+                counter = manager.SafeCounter(len(t_avg) * len(h_avg))
+
+                for h, t in [(x, y) for x in t_avg for y in h_avg]:
+                    print(f"h,t: {h, t}")
+                    task_queue.put((average_smooth_detect_mp, (spec_data, h, t, spans, widths, proms, training_data,
+                                                                marked_peaks, task_queue, counter)))
+
+                    with multiprocessing.Pool(2) as pool:
+                        print('2')
+                        while True:
+                            if counter.is_zero():
+                                break
+                            try:
+                                task, args = task_queue.get(timeout=0.5)
+                            except queue.Empty:
+                                continue
+                            async_result = pool.apply_async(task, args)
+                            return {'training_result': async_result}
+                        pool.close()
+                        pool.join()
 
         elif self.optimization_method == 'DE':
             bounds = [(min(self.training_params['t_avg']), max(self.training_params['t_avg'])),
@@ -797,66 +948,19 @@ class Peako(object):
 
         """
         if mode == 'training' or mode == 'validation':
-            specfiles = self.specfiles
+            #specfiles = self.specfiles
             t_data = self.training_data
             s_data = self.spec_data
-            marked_peaks = self.marked_peaks_index[self.current_k] if mode == 'training' else self.validation_index[self.current_k]
+            marked_peaks = self.marked_peaks_index[self.current_k] if mode == 'training' else self.validation_index[
+                self.current_k]
         elif mode == 'testing':
-            specfiles = self.specfiles_test
+            #specfiles = self.specfiles_test
             t_data = self.testing_data
             s_data = self.spec_data_test
             marked_peaks = self.marked_peaks_index_testing
-        sim_out = [] if array_out else 0
         print('computing similarity...') if self.verbosity > 0 else None
         # loop over files and chirps, and then over the spectra which were marked by hand
-        for f in range(len(specfiles)):
-            bins_per_chirp = np.diff(np.hstack(
-                (s_data[f].chirp_start_indices.values, s_data[f].n_range_layers.values)))
-            velbins_per_bin = (np.repeat(s_data[f]['velocity_vectors'].values,
-                                         [int(b) for b in bins_per_chirp], axis=0))
-            t_ind, h_ind = np.where(marked_peaks[f] == 1)
-            for h, t in zip(h_ind, t_ind):
-                user_peaks = t_data[f]['peaks'].values[t, h, :]
-                user_peaks = np.unique(user_peaks[~np.isnan(user_peaks)])
-                # convert velocities to indices
-                user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
-                spectrum = s_data[f]['doppler_spectrum'].values[t, h, :]
-                spectrum_db = utils.lin2z(spectrum)
-                spectrum_db[np.isnan(spectrum_db)] = 0.0
-                spectrum_db[spectrum == self.fill_value] = 0.0
-                user_peaks.sort()
-                peako_peaks = algorithm_peaks[f]['PeakoPeaks'].values[t,h, :]
-                peako_peaks = np.unique(peako_peaks[peako_peaks > 0])
-                peako_peaks.sort()
-                le_user_peaks, re_user_peaks = find_edges(spectrum, self.fill_value, user_peaks)
-                le_alg_peaks, re_alg_peaks = find_edges(spectrum, self.fill_value, peako_peaks)
-                similarity = 0
-                overlap_area = math.inf
-                while(len(peako_peaks) > 0) & (len(user_peaks) > 0) & (overlap_area > 0):
-                    # compute maximum overlapping area
-                    user_ind, alg_ind, overlap_area = overlapping_area([le_user_peaks, re_user_peaks],
-                                                                       [le_alg_peaks, re_alg_peaks],
-                                                                       spectrum_db, np.nanmin(spectrum_db), velbins_per_bin[h])
-                    similarity = similarity + overlap_area
-                    if user_ind is not None:
-                        user_peaks = np.delete(user_peaks, user_ind)
-                        le_user_peaks = np.delete(le_user_peaks, user_ind)
-                        re_user_peaks = np.delete(re_user_peaks, user_ind)
-                    if alg_ind is not None:
-                        peako_peaks = np.delete(peako_peaks, alg_ind)
-                        le_alg_peaks = np.delete(le_alg_peaks, alg_ind)
-                        re_alg_peaks = np.delete(re_alg_peaks, alg_ind)
-
-                # Subtract area of non-overlapping regions
-                for i in range(len(le_alg_peaks)):
-                    similarity = similarity - area_above_floor(le_alg_peaks[i], re_alg_peaks[i], spectrum_db,
-                                                               np.nanmin(spectrum_db), velbins_per_bin[h])
-                for i in range(len(le_user_peaks)):
-                    similarity = similarity - area_above_floor(le_user_peaks[i], re_user_peaks[i], spectrum_db,
-                                                               np.nanmin(spectrum_db), velbins_per_bin[h])
-
-                if not array_out:
-                    sim_out += similarity
+        sim_out = compute_similarity(s_data, t_data, marked_peaks, algorithm_peaks, self.fill_value, array_out)
         return sim_out
 
     def assert_training(self):
@@ -867,8 +971,8 @@ class Peako(object):
 
         # assert that training has happened
         # check if there is a training mask and if there is a result
-        assert(len(self.marked_peaks_index[0]) > 0), "no training mask available"
-        assert(self.training_result['loop'][0].shape[0] + self.training_result['DE'][0].shape[0] > 2), \
+        assert (len(self.marked_peaks_index[0]) > 0), "no training mask available"
+        assert (self.training_result['loop'][0].shape[0] + self.training_result['DE'][0].shape[0] > 2), \
             "no training result"
 
     def check_store_found_peaks(self):
@@ -921,7 +1025,7 @@ class Peako(object):
             if self.training_result[j][k].shape[0] > 1:
                 print(f'{j}, k={k}:')
                 catch = np.nanmax(self.training_result[j][k][:, -1])
-                print(f'similarity is {round(catch/maximum_similarity[k]*100,2)}% of maximum possible similarity')
+                print(f'similarity is {round(catch / maximum_similarity[k] * 100, 2)}% of maximum possible similarity')
                 print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, width: {0[3]}, prom: {0[4]}'.format(
                     (self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1])))
 
@@ -951,12 +1055,13 @@ class Peako(object):
                                                          polyorder=self.polyorder,
                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                          all_spectra=True,
-                                                         #marked_peaks_index=self.marked_peaks_index_testing,
+                                                         # marked_peaks_index=self.marked_peaks_index_testing,
                                                          verbosity=self.verbosity)
                 self.peako_peaks_testing[j].append(peako_peaks_test)
                 catch = self.area_peaks_similarity(peako_peaks_test, mode='testing')
-                print(f'similarity for testing set is {round(catch/maximum_similarity*100,2)}% of maximum possible '
-                      f'similarity')
+                print(
+                    f'similarity for testing set is {round(catch / maximum_similarity * 100, 2)}% of maximum possible '
+                    f'similarity')
                 print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, width: {0[3]}, prom: {0[4]}'.format(
                     (self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1])))
 
@@ -1066,7 +1171,7 @@ class Peako(object):
 
         i = random.randint(0, len(h_ind) - 1)
         c = np.digitize(h_ind[i], utils.get_chirp_offsets(self.spec_data[f]))
-        velbins = self.spec_data[f]['velocity_vectors'].values[c-1, :]
+        velbins = self.spec_data[f]['velocity_vectors'].values[c - 1, :]
         spectrum = self.spec_data[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
         user_ind = utils.vel_to_ind(self.training_data[f]['peaks'].values[t_ind[i], h_ind[i], :], velbins=velbins,
                                     fill_value=-999)
@@ -1091,11 +1196,12 @@ class Peako(object):
                     i_max = np.argmax(self.training_result[j][k][:, -1])
                     t, h, s, w, p = self.training_result[j][k][i_max, :-1]
                     avg_spectra = average_spectra(self.spec_data, int(t), int(h))
-                    #avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
+                    # avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
                     smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.polyorder,
                                                       verbosity=self.verbosity)
                     smoothed_spectrum = smoothed_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
-                    ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
+                    ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7,
+                            label='smoothed spectrum')
 
                 ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
                         color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
@@ -1118,7 +1224,7 @@ class Peako(object):
 
         return fig, ax
 
-    def plot_algorithm_spectrum(self, file, time:list, height:list, mode='training', k=0, method='loop', **kwargs):
+    def plot_algorithm_spectrum(self, file, time: list, height: list, mode='training', k=0, method='loop', **kwargs):
         """
         :param file: number of file (integer)
         :param time: the time(s) of the spectrum to plot (datetime.datetime)
@@ -1154,7 +1260,7 @@ class Peako(object):
 
         for t_i, h_i in list(zip(time_index, range_index)):
             c = np.digitize(h_i, utils.get_chirp_offsets(self.spec_data[file]))
-            velbins = self.spec_data[file]['velocity_vectors'].values[c-1, :]
+            velbins = self.spec_data[file]['velocity_vectors'].values[c - 1, :]
             fig, ax = plt.subplots(1)
             peako_ind = algorithm_peaks[file].PeakoPeaks.values[t_i, h_i, :]
             peako_ind = peako_ind[peako_ind > 0]
@@ -1164,8 +1270,10 @@ class Peako(object):
             if plot_smoothed:
                 averaged_spectrum = avg_spectra[file]['doppler_spectrum'].values[t_i, h_i, :]
                 smoothed_spectrum = smoothed_spectra[file]['doppler_spectrum'].values[t_i, h_i, :]
-                ax.plot(velbins, utils.lin2z(averaged_spectrum), linestyle='-', linewidth=0.7, label='averaged spectrum')
-                ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
+                ax.plot(velbins, utils.lin2z(averaged_spectrum), linestyle='-', linewidth=0.7,
+                        label='averaged spectrum')
+                ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7,
+                        label='smoothed spectrum')
 
             ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
                     color='#0339cc', markeredgecolor='k',
@@ -1184,7 +1292,6 @@ class Peako(object):
                                             f'{utils.format_hms(self.spec_data[file]["time"].values[t_i])}_'
                                             f'{round(self.spec_data[file]["range_layers"].values[h_i])}m_k{k}.png')
         return fig, ax
-
 
     def test_peako(self, test_data, **kwargs):
         """
@@ -1234,14 +1341,14 @@ class Peako(object):
                 if len(algorithm_peaks[j][k]) > 0:
                     for f in range(len(algorithm_peaks[j][k])):
                         fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][k][f], key='PeakoPeaks', **kwargs)
-                        ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f+1}')
+                        ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f + 1}')
                         if len(self.plot_dir) > 0:
                             fig.savefig(self.plot_dir + f'{mode}_{j}_height_time_peako_{f}_k{k}.png')
         for f in range(len(user_peaks)):
             fig, ax = plot_timeheight_numpeaks(user_peaks[f], key='peaks')
-            ax.set_title(f'{mode}, user peaks, file number {f+1}')
+            ax.set_title(f'{mode}, user peaks, file number {f + 1}')
             if len(self.plot_dir) > 0:
-                fig.savefig(self.plot_dir + f'{mode}_{f+1}_height_time_user.png')
+                fig.savefig(self.plot_dir + f'{mode}_{f + 1}_height_time_user.png')
         return algorithm_peaks
 
     def cleanup(self):
@@ -1290,6 +1397,7 @@ class TrainingData(object):
         """
         self.spec_data.append(xr.open_mfdataset(specfile, combine='by_coords'))
         self.num_spec.append(num_spec)
+        self.specfiles_in.append(specfile)
         self.update_dimensions()
 
     def update_dimensions(self):
@@ -1326,8 +1434,8 @@ class TrainingData(object):
         for n in range(len(self.spec_data)):
             s = 0
             while s < self.num_spec[n]:
-                random_index_t = random.randint(1, self.tdim[n]-1)
-                random_index_r = random.randint(1, self.rdim[n]-1)
+                random_index_t = random.randint(1, self.tdim[n] - 1)
+                random_index_r = random.randint(1, self.rdim[n] - 1)
                 if self.verbosity > 1:
                     print(f'r: {random_index_r}, t: {random_index_t}')
                 vals, powers = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
@@ -1353,21 +1461,22 @@ class TrainingData(object):
         if "chirp" in kwargs:
             if not c_ind == kwargs['chirp']:
                 return np.nan, np.nan
-        #print(f'range index {r_index} is in chirp {c_ind} with ranges in chirps {n_rg[1:]}')
+        # print(f'range index {r_index} is in chirp {c_ind} with ranges in chirps {n_rg[1:]}')
 
         heightindex_center = r_index
         timeindex_center = t_index
-        this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(timeindex_center), int(heightindex_center),
-                                                                        :]
-        #print(f'time index center: {timeindex_center}, height index center: {heightindex_center}')
+        this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(timeindex_center),
+                               int(heightindex_center),
+                               :]
+        # print(f'time index center: {timeindex_center}, height index center: {heightindex_center}')
         if not np.sum(~np.isnan(this_spectrum_center.values)) < 2:
             velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
             xlim = velbins.values[~np.isnan(this_spectrum_center.values) & ~(this_spectrum_center.values == 0)][[0, -1]]
             xlim += [-1, +1]
             # if this spectrum is not empty, we plot 3x3 panels with shared x and y axes
             fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
-            fig.suptitle(f'Mark peaks in the center panel spectrum. Fig. {self.plot_count[n_file]+1} out of '
-                         f'{self.num_spec[n_file]}; File {n_file+1} of {len(self.spec_data)}', size='xx-large',
+            fig.suptitle(f'Mark peaks in the center panel spectrum. Fig. {self.plot_count[n_file] + 1} out of '
+                         f'{self.num_spec[n_file]}; File {n_file + 1} of {len(self.spec_data)}', size='xx-large',
                          fontweight='semibold')
             for dim1 in range(3):
                 for dim2 in range(3):
@@ -1384,7 +1493,7 @@ class TrainingData(object):
 
                         thisSpectrum = self.spec_data[n_file]['doppler_spectrum'][int(timeindex), int(heightindex), :]
 
-                        #print(f'time index: {timeindex}, height index: {heightindex}')
+                        # print(f'time index: {timeindex}, height index: {heightindex}')
                         if heightindex == -1 or timeindex == -1:
                             thisSpectrum = thisSpectrum.where(thisSpectrum.values == -999)
                             comment = comment + ' (time or range boundary)'
@@ -1392,7 +1501,7 @@ class TrainingData(object):
                         ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
                         ax[dim1, dim2].set_xlim(xlim)
                         ax[dim1, dim2].set_title(f'range:'
-                                                 f'{np.round(self.spec_data[n_file]["range_layers"].values[int(heightindex)]/1000, 2)} km,'
+                                                 f'{np.round(self.spec_data[n_file]["range_layers"].values[int(heightindex)] / 1000, 2)} km,'
                                                  f' time: {utils.format_hms(self.spec_data[n_file]["time"].values[int(timeindex)])}' + comment,
                                                  fontweight='semibold', fontsize=9, color='b')
                         ax[dim1, dim2].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
@@ -1452,10 +1561,9 @@ class TrainingData(object):
             else:
                 with xr.open_dataset(self.peaks_ncfiles[i]) as data:
                     dataset = data.load()
-                assert(self.training_data_out[i].shape == dataset.peaks.shape)
+                assert (self.training_data_out[i].shape == dataset.peaks.shape)
                 mask = ~np.isnan(self.training_data_out[i])
                 dataset.peaks.values[mask] = self.training_data_out[i][mask]
-                #dataset = dataset.assign_coords({'range': self.spec_data[i].range_layers.values})
+                # dataset = dataset.assign_coords({'range': self.spec_data[i].range_layers.values})
                 dataset.to_netcdf(self.peaks_ncfiles[i])
                 print(f'updated file {self.peaks_ncfiles[i]}')
-
