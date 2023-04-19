@@ -386,6 +386,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
                     spec_chunk, window_length, polyorder=polyorder, axis=2, mode='nearest')
                 # experimental: fill smoothed spectra "gaps" with raw spectrum values
+                # TODO maybe this causes the spurious peaks at the flanks of the spectra?
                 gaps = (spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :] <= 0.) & ~nanmask
                 spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][gaps] = spec_chunk[gaps]
                 #spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
@@ -541,6 +542,7 @@ class Peako(object):
         self.smoothed_spectra = []
         self.verbosity = verbosity
         self.plot_dir = kwargs['plot_dir'] if 'plot_dir' in kwargs else ''
+        np.random.seed(42)
         if 'plot_dir' in kwargs and not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
             print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
@@ -715,7 +717,7 @@ class Peako(object):
             self.training_result['loop'][self.current_k] = np.delete(self.training_result['loop'][self.current_k], 0,
                                                                      axis=0)
 
-            # extract the parameter combination yielding the maximum in similarity
+            # extract the three parameter combinations yielding the maximum in similarity
             t, h, s, po, w, pr = np.unravel_index(np.argsort(similarity_array, axis=None)[-3:][::-1], similarity_array.shape)
             return {'training result': [{'t_avg': self.training_params['t_avg'][ti],
                     'h_avg': self.training_params['h_avg'][hi],
