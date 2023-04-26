@@ -93,7 +93,7 @@ def save_and_reload(spec_data, filenames):
     list_out = [f + 'temp' for f in filenames]
     for s, f in zip(spec_data, list_out):
         s.to_netcdf(f)
-    spec_data = [xr.open_dataset(l, mask_and_scale=True) for l in list_out]
+    spec_data = [xr.open_dataset(l, mask_and_scale=True).load() for l in list_out]
     return spec_data
 
 

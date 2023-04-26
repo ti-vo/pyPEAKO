@@ -11,6 +11,18 @@ import random
 import queue
 import multiprocessing
 import multiprocessing.managers
+# Backup original AutoProxy function
+backup_autoproxy = multiprocessing.managers.AutoProxy
+
+# Defining a new AutoProxy that handles unwanted key argument 'manager_owned'
+def redefined_autoproxy(token, serializer, manager=None, authkey=None,
+          exposed=None, incref=True, manager_owned=True):
+    # Calling original AutoProxy without the unwanted key argument
+    return backup_autoproxy(token, serializer, manager, authkey,
+                     exposed, incref)
+
+# Updating AutoProxy definition in multiprocessing.managers package
+multiprocessing.managers.AutoProxy = redefined_autoproxy
 import matplotlib
 import matplotlib.pyplot as plt
 from pypeako import utils
@@ -296,38 +308,19 @@ def average_smooth_detect(spec_data, t_avg, h_avg, span, width, prom, all_spectr
                       fill_value=fill_value, **kwargs)
     return peaks
 
-def average_smooth_detect_mp(spec_data, h, t, spans, widths, proms, training_data, marked_peaks, fill_value,
-                             task_queue, counter):
+
+
+def average_smooth_detect_mp2(spec_data, h, t, s, w, p, training_data, marked_peaks, fill_value):
     # average spectra
-    avg_spec = average_spectra(spec_data, t, h)
+    #print(f"time is {t}, height is {h}", flush=True)
+    avg_spec = average_spectra(spec_data, t, h, verbosity=0)
     # issue second level tasks
-#    for s in spans:
-#        task_queue.put((smooth_detect_similarity_mp, (avg_spec, spec_data, s, widths, proms, training_data, marked_peaks,
-#                                                      fill_value, task_queue, counter)))
-#        # increment the counter by the number of subtasks
-#        counter.increment()
-    # decrement the counter
-    counter.decrement()
+    #print(f"span: {s}, width {w}, prominence {p}", flush=True)
+    smoothed_spec = smooth_spectra(avg_spec, spec_data, s, polyorder=2, verbosity=0)
+    peaks = get_peaks(smoothed_spec, spec_data, p, w, all_spectra=True, max_peaks=5, fill_value=fill_value)
+    return compute_similarity(spec_data, training_data, marked_peaks, peaks, fill_value, array_out=False)
 
 
-def smooth_detect_similarity_mp(avg_spec, spec_data, span, widths, proms, training_data, marked_peaks, fill_value,
-                                task_queue, counter):
-    # smooth spectra
-    smoothed_spec = smooth_spectra(avg_spec, spec_data, span, polyorder=2)
-    # issue third level tasks
-    for w, p in [(w, p) for w in widths for p in proms]:
-        task_queue.put((detect_get_similarity_mp, (smoothed_spec, spec_data, w, p,
-                                                   training_data, marked_peaks, fill_value, task_queue, counter)))
-        # increment the counter by the number of subtasks
-        counter.increment()
-    # decrement the counter
-    counter.decrement()
-
-def detect_get_similarity_mp(smoothed_spec, spec_data, width, prom, training_data, marked_peaks, fill_value, task_queue,
-                             counter):
-    peaks = get_peaks(smoothed_spec, spec_data, prom, width, all_spectra=True, max_peaks=5, fill_value=fill_value)
-    similarity = compute_similarity(spec_data, training_data, marked_peaks, peaks, fill_value, array_out=False)
-    counter.decrement()
 
 def average_single_bin(specdata_values: np.array, B: np.array, doppler_bin: int, range_offsets: list):
     """
@@ -357,7 +350,7 @@ def average_spectra(spec_data, t_avg, h_avg, **kwargs):
     :param kwargs: 'verbosity'
     :return: list of xarray data sets containing averaged spectra
     """
-    print('averaging...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+    print('averaging...', flush=True) if 'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
     avg_specs_list = []  # initialize empty list
     for f in range(len(spec_data)):
         # average spectra over neighbors in time-height
@@ -394,8 +387,8 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
     :param kwargs: 'verbosity'
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
-    print(f'smoothing using polynomial of degree {polyorder}...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 \
-        else None
+    print(f'smoothing using polynomial of degree {polyorder}...', flush=True) if 'verbosity' in kwargs and \
+                                                                                 kwargs['verbosity'] > 0 else None
     spectra_out = [i.copy(deep=True) for i in averaged_spectra]
     if span == 0.0:
         return spectra_out
@@ -566,28 +559,6 @@ def compute_similarity(s_data, t_data, marked_peaks, algorithm_peaks, fill_value
                 sim_out += similarity
     return sim_out
 
-class SafeCounter:
-    def __init__(self, count):
-        self._lock = multiprocessing.Lock()
-        self._value = count
-
-    def is_zero(self):
-        with self._lock:
-            return self._value == 0
-
-    def increment(self, value=1):
-        with self._lock:
-            self._value += value
-
-    def decrement(self, value=1):
-        with self._lock:
-            self._value -= value
-
-
-class CustomManager(multiprocessing.managers.BaseManager):
-    # nothing
-    pass
-
 
 def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
     # call scipy.signal.find_peaks to detect peaks in the (logarithmic) spectrum
@@ -609,9 +580,8 @@ class Peako(object):
         initialize a Peako object
         :param training_data: list of strings (netcdf files to read in written by TrainingData.save_training_data, i.e.
         filenames starting with marked_peaks_...)
-        :param optimization_method: Either 'loop' or 'DE'. In case of 'loop' looping over different parameter
-        combinations is performed in a brute-like way. Option 'DE' uses differential evolution toolkit to find
-        optimal solution (expensive). Default is 'loop'.
+        :param optimization_method: Either 'loop' or 'multiprocessing'. In case of 'loop' looping over different parameter
+        combinations is performed in a brute-like way. Option 'multiprocessing' uses multiprocessing for same task. Default is 'loop'.
         :param polyorder: integer specifying the order of the polynomial used for Savitzky Golay filtering (from
         scipy.signal). The default is 2.
         :param max_peaks: integer, maximum number of peaks to be detected by the algorithm. Defaults to 5.
@@ -633,7 +603,7 @@ class Peako(object):
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
         self.spec_data = utils.save_and_reload(self.spec_data, self.specfiles)
-        #self.cleanup()
+        self.cleanup()
         self.optimization_method = optimization_method
         self.polyorder = polyorder
         self.marked_peaks_index = []
@@ -647,12 +617,12 @@ class Peako(object):
         self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
             {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.2, 0.05),
              'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
-        self.training_result = {'loop': [np.empty((1, 6))], 'DE': [np.empty((1, 6))]} if not self.k_fold_cv else {
-            'loop': [np.empty((1, 6))] * self.k, 'DE': [np.empty((1, 6))] * self.k}
-        self.validation_result = {'loop': [np.empty(1)], 'DE': [np.empty(1)]} if not self.k_fold_cv else {
-            'loop': [np.empty(1)] * self.k, 'DE': [np.empty(1)] * self.k}
-        self.peako_peaks_training = {'loop': [[] for _ in range(self.k + 1)], 'DE': [[] for _ in range(self.k + 1)]}
-        self.peako_peaks_testing = {'loop': [], 'DE': []}
+        self.training_result = {'loop': [np.empty((1, 6))], 'multiprocessing': [np.empty((1, 6))]} if not self.k_fold_cv else {
+            'loop': [np.empty((1, 6))] * self.k, 'multiprocessing': [np.empty((1, 6))] * self.k}
+        self.validation_result = {'loop': [np.empty(1)], 'multiprocessing': [np.empty(1)]} if not self.k_fold_cv else {
+            'loop': [np.empty(1)] * self.k, 'multiprocessing': [np.empty(1)] * self.k}
+        self.peako_peaks_training = {'loop': [[] for _ in range(self.k + 1)], 'multiprocessing': [[] for _ in range(self.k + 1)]}
+        self.peako_peaks_testing = {'loop': [], 'multiprocessing': []}
         self.testing_files = []
         self.testing_data = []
         self.marked_peaks_index_testing = []
@@ -848,94 +818,31 @@ class Peako(object):
                                          'similarity': np.sort(similarity_array, axis=None)[-(i + 1)]}
                                         for i, (ti, hi, si, wi, pi) in enumerate(zip(t, h, s, w, p))]}
 
-
         elif self.optimization_method == 'multiprocessing':
-            CustomManager.register("SafeCounter", SafeCounter)
-            CustomManager.register("Queue", multiprocessing.Queue)
-            spec_data = [s['doppler_spectrum'].load() for s in self.spec_data]
-            training_data = [t.load() for t in self.training_data]
-            marked_peaks = self.marked_peaks_index[self.current_k]
             t_avg = self.training_params['t_avg']
             h_avg = self.training_params['h_avg']
             spans = self.training_params['span']
             widths = self.training_params['width']
             proms = self.training_params['prom']
+            spec_data = self.spec_data
+            training_data = [t.load() for t in self.training_data]
+            marked_peaks = self.marked_peaks_index[self.current_k]
 
-            with CustomManager() as manager:
-                task_queue = manager.Queue
-                counter = manager.SafeCounter(len(t_avg) * len(h_avg))
 
-                for h, t in [(x, y) for x in t_avg for y in h_avg]:
-                    print(f"h,t: {h, t}")
-                    task_queue.put((average_smooth_detect_mp, (spec_data, h, t, spans, widths, proms, training_data,
-                                                                marked_peaks, task_queue, counter)))
+            with multiprocessing.Pool(4) as pool:
+                arguments = [(spec_data, t, h, s, w, p, training_data, marked_peaks, self.fill_value )
+                             for t in t_avg for h in h_avg for s in spans for w in widths for p in proms]
+                async_result = pool.starmap_async(average_smooth_detect_mp2, arguments)
+                results = async_result.get()
+                top_3 = np.argsort(results)[-3:][::-1]
+                return {'training result': [{'t_avg': arguments[t][1],
+                                         'h_avg': arguments[t][2],
+                                         'span': arguments[t][3],
+                                         'width': arguments[t][4],
+                                         'prom': arguments[t][5],
+                                         'similarity': results[t]}
+                                        for t in top_3]}
 
-                    with multiprocessing.Pool(2) as pool:
-                        print('2')
-                        while True:
-                            if counter.is_zero():
-                                break
-                            try:
-                                task, args = task_queue.get(timeout=0.5)
-                            except queue.Empty:
-                                continue
-                            async_result = pool.apply_async(task, args)
-                            return {'training_result': async_result}
-                        pool.close()
-                        pool.join()
-
-        elif self.optimization_method == 'DE':
-            bounds = [(min(self.training_params['t_avg']), max(self.training_params['t_avg'])),
-                      (min(self.training_params['h_avg']), max(self.training_params['h_avg'])),
-                      (np.log10(min(self.training_params['span'])), np.log10(max(self.training_params['span']))),
-                      (min(self.training_params['width']), max(self.training_params['width'])),
-                      (min(self.training_params['prom']), max(self.training_params['prom']))]
-            disp = True if self.verbosity > 0 else False
-            result_de = differential_evolution(self.fun_to_minimize, bounds=bounds, disp=disp, workers=8)
-
-            # remove the first line from the training result
-            self.training_result['DE'][self.current_k] = np.delete(self.training_result['DE'][self.current_k], 0,
-                                                                   axis=0)
-            # create dictionary
-            result = {'t_avg': result_de['x'][0],
-                      'h_avg': int(result_de['x'][1]),
-                      'span': result_de['x'][2],
-                      'width': result_de['x'][3],
-                      'prom': result_de['x'][4],
-                      'similarity': result_de['x'][5]}
-            return result
-
-    def fun_to_minimize(self, parameters):
-        """
-        Function which is minimized by the optimization toolkit (differential evolution).
-        It averages the neighbor spectra in a range defined by t_avg and h_avg,
-        calls smooth_spectrum with the defined polynomial (Peako.polyorder),
-        and calls get_peaks using the defined prominence and width. The t_avg, h_avg, span, width and prominence
-        parameters are passed as parameters:
-
-        :param parameters: list containing t_avg, h_avg, span, width and prominence. If this function is called within
-        scipy.optimize.differential_evolution, this corresponds to the order of the elements in "bounds"
-        :return: res: Result (negative similarity measure based on area below peaks); negative because optimization
-        toolkits usually search for the minimum.
-
-        """
-
-        t_avg, h_avg, span, width, prom = parameters
-        span = 10 ** span
-        t_avg = np.int(round(t_avg))
-        h_avg = np.int(round(h_avg))
-
-        peako_peaks = average_smooth_detect(self.spec_data, t_avg=t_avg, h_avg=h_avg, span=span, width=width, prom=prom,
-                                            polyorder=self.polyorder, max_peaks=self.max_peaks,
-                                            fill_value=self.fill_value,
-                                            marked_peaks_index=self.marked_peaks_index[self.current_k],
-                                            verbosity=self.verbosity)
-        res = self.area_peaks_similarity(peako_peaks, array_out=False)
-
-        self.training_result['DE'][self.current_k] = np.append(self.training_result['DE'][self.current_k],
-                                                               [[t_avg, h_avg, span, width, prom, res]], axis=0)
-
-        return -res
 
     def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
@@ -972,8 +879,8 @@ class Peako(object):
         # assert that training has happened
         # check if there is a training mask and if there is a result
         assert (len(self.marked_peaks_index[0]) > 0), "no training mask available"
-        assert (self.training_result['loop'][0].shape[0] + self.training_result['DE'][0].shape[0] > 2), \
-            "no training result"
+        #assert (self.training_result['loop'][0].shape[0] + self.training_result['DE'][0].shape[0] > 2), \
+        #    "no training result"
 
     def check_store_found_peaks(self):
         """
@@ -1107,7 +1014,7 @@ class Peako(object):
         """
         Generates 4 panels of 3D plots of parameter vs. parameter vs. similarity for evaluating the training by eye
 
-        :param key: dictionary key in Peako.training_result for which to make the 3D plots, either 'loop' or 'DE'.
+        :param key: dictionary key in Peako.training_result for which to make the 3D plots, either 'loop' or 'multiprocessing'.
         :return: fig, ax : matplotlib.pyplot figure and axes
         """
 
