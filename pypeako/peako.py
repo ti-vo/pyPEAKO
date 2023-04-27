@@ -1142,21 +1142,21 @@ class Peako(object):
             self.check_store_found_peaks()
             algorithm_peaks = self.peako_peaks_training[method][k]
             i_max = np.argmax(self.training_result[method][k][:, -1])
-            t, h, s, w, p = self.training_result[method][k][i_max, :-1]
+            t, h, s, po, w, pr = self.training_result[method][k][i_max, :-1]
 
         elif mode == 'manual':
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
-            t, h, s, w, p = kwargs['peako_params']
+            t, h, s, po, w, pr = kwargs['peako_params']
             m_p_i = [np.zeros(i.doppler_spectrum.shape[:2]) for i in self.spec_data]
             m_p_i[file][time_index, range_index] = 1
             algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
-                                                    width=w, prom=p, polyorder=self.polyorder,
+                                                    width=w, prom=pr, polyorder=po,
                                                     fill_value=self.fill_value, max_peaks=self.max_peaks,
                                                     all_spectra=False, marked_peaks_index=m_p_i)
 
         if plot_smoothed:
             avg_spectra = average_spectra(self.spec_data, t_avg=int(t), h_avg=int(h))
-            smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, span=s, polyorder=self.polyorder)
+            smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, span=s, polyorder=po)
 
         for t_i, h_i in list(zip(time_index, range_index)):
             c = np.digitize(h_i, utils.get_chirp_offsets(self.spec_data[file]))
