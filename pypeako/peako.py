@@ -488,7 +488,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
 
 class Peako(object):
     def __init__(self, training_data=[], optimization_method='loop',
-                  max_peaks=5, k=0, num_training_samples=None, verbosity=0, **kwargs):
+                  max_peaks=10, k=0, num_training_samples=None, verbosity=0, **kwargs):
 
         """
         initialize a Peako object
@@ -529,8 +529,8 @@ class Peako(object):
         self.num_training_samples = num_training_samples
         self.fill_value = np.nan
         self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
-            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.2, 0.05), 'polyorder': [2, 3],
-             'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 1.5, 0.5)}
+            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.3, 0.05), 'polyorder': [1, 2, 3, 4],
+             'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 2.5, 0.5)}
         self.training_result = {'loop': [np.empty((1, 7))], 'DE': [np.empty((1, 7))]} if not self.k_fold_cv else {
             'loop': [np.empty((1, 7))]*self.k, 'DE': [np.empty((1, 7))]*self.k}
         self.validation_result = {'loop': [np.empty(1)], 'DE': [np.empty(1)]} if not self.k_fold_cv else {
