@@ -55,12 +55,15 @@ def find_edges(spectrum, fill_value, peak_locations):
     """
     Find the indices of left and right edges of peaks in a spectrum
 
-    :param spectrum: a single spectrum in logarithmic units
+    :param spectrum: a single spectrum in linear units
     :param peak_locations: indices of peaks detected for this spectrum
     :param fill_value: The fill value which indicates the spectrum is below noise floor
     :return: left_edges: list of indices of left edges,
              right_edges: list of indices of right edges
     """
+    if np.isnan(fill_value):
+        spectrum[np.isnan(spectrum)] = -999.
+        fill_value = -999.
     left_edges = []
     right_edges = []
 
@@ -68,7 +71,6 @@ def find_edges(spectrum, fill_value, peak_locations):
         # start with the left edge
         p_l = peak_locations[p_ind]
 
-        # set first estimate of left edge to last bin before the peak
         closest_below_noise_left = np.where(spectrum[0:p_l] == fill_value)
         if len(closest_below_noise_left[0]) == 0:
             closest_below_noise_left = 0
@@ -516,6 +518,7 @@ class Peako(object):
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
         self.spec_data = utils.save_and_reload(self.spec_data, self.specfiles)
+        #self.cleanup()
         self.optimization_method = optimization_method
         self.marked_peaks_index = []
         self.validation_index = []
@@ -542,7 +545,7 @@ class Peako(object):
         self.smoothed_spectra = []
         self.verbosity = verbosity
         self.plot_dir = kwargs['plot_dir'] if 'plot_dir' in kwargs else ''
-        np.random.seed(42)
+        np.random.seed(94)
         if 'plot_dir' in kwargs and not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
             print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
@@ -750,38 +753,6 @@ class Peako(object):
                       'similarity': result_de['x'][5]}
             return result
 
-    def fun_to_minimize(self, parameters):
-        """
-        Function which is minimized by the optimization toolkit (differential evolution).
-        It averages the neighbor spectra in a range defined by t_avg and h_avg,
-        calls smooth_spectrum with the defined polynomial (Peako.polyorder),
-        and calls get_peaks using the defined prominence and width. The t_avg, h_avg, span, width and prominence
-        parameters are passed as parameters:
-
-        :param parameters: list containing t_avg, h_avg, span, width and prominence. If this function is called within
-        scipy.optimize.differential_evolution, this corresponds to the order of the elements in "bounds"
-        :return: res: Result (negative similarity measure based on area below peaks); negative because optimization
-        toolkits usually search for the minimum.
-
-        """
-
-        t_avg, h_avg, span, width, prom = parameters
-        span = 10 ** span
-        t_avg = np.int(round(t_avg))
-        h_avg = np.int(round(h_avg))
-
-        peako_peaks = average_smooth_detect(self.spec_data, t_avg=t_avg, h_avg=h_avg, span=span, width=width, prom=prom,
-                                            polyorder=self.polyorder, max_peaks=self.max_peaks,
-                                            fill_value=self.fill_value,
-                                            marked_peaks_index=self.marked_peaks_index[self.current_k],
-                                            verbosity=self.verbosity)
-        res = self.area_peaks_similarity(peako_peaks, array_out=False)
-
-        self.training_result['DE'][self.current_k] = np.append(self.training_result['DE'][self.current_k],
-                                                               [[t_avg, h_avg, span, width, prom, res]], axis=0)
-
-        return -res
-
     def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
             peaks in a radar Doppler spectrum
@@ -918,8 +889,7 @@ class Peako(object):
                 print(f'{j}, k={k}:')
                 catch = np.nanmax(self.training_result[j][k][:, -1])
                 print(f'similarity is {round(catch/maximum_similarity[k]*100,2)}% of maximum possible similarity')
-                # TODO (line below) should this not be time = 0 height = 1 index ???
-                print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, polynomial order: {0[3]}, width: {0[4]}, '
+                print('t_avg: {0[0]}, h_avg:{0[1]}, span:{0[2]}, polynomial order: {0[3]}, width: {0[4]}, '
                       'prominence: {0[5]}'.format((self.training_result[j][k][np.argmax(
                         self.training_result[j][k][:, -1]), :-1])))
 
@@ -943,11 +913,12 @@ class Peako(object):
         for j in self.training_result.keys():
             if self.training_result[j][k].shape[0] > 1:
                 print(f'{j}, k={k}:')
-                h, t, s, w, p = self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1]
+                # Todo add polynomial
+                h, t, s, po, w, pr = self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1]
                 peako_peaks_test = average_smooth_detect(spec_data=self.spec_data_test, t_avg=t,
                                                          h_avg=h, span=s,
-                                                         width=w, prom=p,
-                                                         polyorder=self.polyorder,
+                                                         width=w, prom=pr,
+                                                         polyorder=po,
                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                          all_spectra=True,
                                                          #marked_peaks_index=self.marked_peaks_index_testing,
@@ -956,8 +927,7 @@ class Peako(object):
                 catch = self.area_peaks_similarity(peako_peaks_test, mode='testing')
                 print(f'similarity for testing set is {round(catch/maximum_similarity*100,2)}% of maximum possible '
                       f'similarity')
-                # TODO: time-height, not height-time?
-                print('h_avg: {0[0]}, t_avg:{0[1]}, span:{0[2]}, polyorder: {0[3]}, width: {0[4]}, prom: {0[5]}'.format(
+                print('t_avg: {0[0]}, h_avg:{0[1]}, span:{0[2]}, polyorder: {0[3]}, width: {0[4]}, prom: {0[5]}'.format(
                     (self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1])))
 
         return maximum_similarity
@@ -1003,6 +973,23 @@ class Peako(object):
             maximum_similarity.append(self.area_peaks_similarity(user_peaks, mode=mode))
         self.current_k = 0
         return maximum_similarity
+
+    def plot_2d_plots(self, key='loop'):
+
+        training_result = self.training_result[key]
+        fig, ax = plt.subplots(3, 2)
+        n=0
+        parameters = ["t_avg", "h_avg", "span", "polyorder", "wth", "prom"]
+        for i, a in enumerate(ax):
+            for j, b in enumerate(a):
+                for k in range(len(training_result)):
+                    ax[i, j].scatter(training_result[k][:,n], training_result[k][:,-1])
+                ax[i, j].set_xlabel(parameters[n])
+                n += 1
+
+        #
+
+
 
     def plot_3d_plots(self, key='loop', k=0):
         """
@@ -1226,9 +1213,9 @@ class Peako(object):
             user_peaks = self.testing_data
         elif mode == 'manual':
             assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
-            t, h, s, w, p = kwargs['peako_params']
+            t, h, s, po, w, pr = kwargs['peako_params']
             algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
-                                                                width=w, prom=p, polyorder=self.polyorder,
+                                                                width=w, prom=pr, polyorder=po,
                                                                 fill_value=self.fill_value, max_peaks=self.max_peaks,
                                                                 all_spectra=True, verbosity=self.verbosity)]}
             self.create_training_mask()

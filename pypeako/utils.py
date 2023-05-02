@@ -3,6 +3,7 @@ import datetime
 import xarray as xr
 import matplotlib
 import warnings
+import os
 
 star = matplotlib.path.Path.unit_regular_star(6)
 circle = matplotlib.path.Path.unit_circle()
@@ -84,7 +85,7 @@ def mask_fill_values(spec_data: list):
 
 def save_and_reload(spec_data, filenames):
     """
-    Following optimization tip #2 (https://xarray.pydata.org/en/v0.9.2/dask.html) it is better to save intermediate
+    Following optimization tip #3 (https://xarray.pydata.org/en/v2023.04.2/user-guide/dask.html) save intermediate
     results to disk and then load them again
     :param spec_data: list of xarray data arrays
     :param filenames: list of strings (original files that were read in)
@@ -92,8 +93,10 @@ def save_and_reload(spec_data, filenames):
     """
     list_out = [f + 'temp' for f in filenames]
     for s, f in zip(spec_data, list_out):
-        s.to_netcdf(f)
+        if not os.path.isfile(f):
+            s.to_netcdf(f)
     spec_data = [xr.open_dataset(l, mask_and_scale=True) for l in list_out]
+    #spec_data = [s.load() for s in spec_data]
     return spec_data
 
 
