@@ -95,7 +95,7 @@ def save_and_reload(spec_data, filenames):
     for s, f in zip(spec_data, list_out):
         if not os.path.isfile(f):
             s.to_netcdf(f)
-    spec_data = [xr.open_dataset(l, mask_and_scale=True) for l in list_out]
+    spec_data = [xr.open_dataset(l, mask_and_scale=True, chunks={"time":10}) for l in list_out]
     #spec_data = [s.load() for s in spec_data]
     return spec_data
 

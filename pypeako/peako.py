@@ -913,12 +913,11 @@ class Peako(object):
         for j in self.training_result.keys():
             if self.training_result[j][k].shape[0] > 1:
                 print(f'{j}, k={k}:')
-                # Todo add polynomial
                 h, t, s, po, w, pr = self.training_result[j][k][np.argmax(self.training_result[j][k][:, -1]), :-1]
-                peako_peaks_test = average_smooth_detect(spec_data=self.spec_data_test, t_avg=t,
-                                                         h_avg=h, span=s,
+                peako_peaks_test = average_smooth_detect(spec_data=self.spec_data_test, t_avg=int(t),
+                                                         h_avg=int(h), span=s,
                                                          width=w, prom=pr,
-                                                         polyorder=po,
+                                                         polyorder=int(po),
                                                          max_peaks=self.max_peaks, fill_value=self.fill_value,
                                                          all_spectra=True,
                                                          #marked_peaks_index=self.marked_peaks_index_testing,
