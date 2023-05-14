@@ -42,12 +42,12 @@ def round_to_odd(f):
 def argnearest(array, value):
     """larda function to find the index of the nearest value in a sorted array, for example time or range axis
 
-    :param array: sorted numpy array with values, list will be converted to 1D array
+    :param array: sorted array with values, list and dask arrays will be converted to 1D array
     :param value: value for which to find the nearest neighbor
     :return:
         index of the nearest neighbor in array
     """
-    if type(array) == list:
+    if type(array) in [list, xr.DataArray]:
         array = np.array(array)
     i = np.searchsorted(array, value) - 1
 
