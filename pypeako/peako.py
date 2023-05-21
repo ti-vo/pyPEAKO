@@ -362,7 +362,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
     :param kwargs: 'verbosity'
     :return: spectra_out, an array with same dimensions as spectra containing the smoothed spectra
     """
-    print(f'smoothing using polynomial of degree {polyorder}...') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 \
+    print(f'smoothing using polynomial of degree {polyorder}') if 'verbosity' in kwargs and kwargs['verbosity'] > 0 \
         else None
     #spectra_out = [i.copy(deep=True) for i in averaged_spectra]
     spectra_out = [np.zeros(i['doppler_spectrum'].values.shape) for i in averaged_spectra]
@@ -374,7 +374,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
             velbins = spec_data[f]['velocity_vectors'].values[c, :]
             window_length = utils.round_to_odd(span / utils.get_vel_resolution(velbins))
             print(f'chirp {c+1}, window length {window_length}, for span = {span} m/s') if \
-                'verbosity' in kwargs and kwargs['verbosity'] > 0 else None
+                'verbosity' in kwargs and kwargs['verbosity'] > 10 else None
 
             if window_length == 1:
                 spectra_out[f][:, r_ind[0]: r_ind[1], :] = \
@@ -609,7 +609,8 @@ class Peako(object):
         self.spec_data = [s.load() for s in self.spec_data]
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
-        self.spec_data = utils.save_and_reload(self.spec_data, self.specfiles)
+        list_out = [f + 'temp' for f in self.specfiles]
+        self.spec_data = utils.save_and_reload(self.spec_data, list_out)
         #self.cleanup()
         self.optimization_method = optimization_method
         self.marked_peaks_index = []
@@ -856,21 +857,27 @@ class Peako(object):
         for t_avg in self.training_params['t_avg']:
             for h_avg in self.training_params['h_avg']:
                 filenames = ['.'.join(s.split('.')[:-1]) + f'_t{t_avg}_h{h_avg}' + '.NCtemp' for s in self.specfiles]
-                if any(~os.path.isfile(f) for f in filenames):
+                if not all([os.path.isfile(f) for f in filenames]):
                     avg_spec = average_spectra(self.spec_data, t_avg=t_avg, h_avg=h_avg)
                     avg_spec = utils.save_and_reload(avg_spec, filenames)
+                    print(f"saving temporary files: {filenames}") if self.verbosity > 0 else None
                 else:
+                    print(f"files already exist, loading from disk: {filenames}") if self.verbosity > 0 else None
                     avg_spec = [xr.open_dataset(f, mask_and_scale=True, chunks={"time":10}) for f in filenames]
 
                 for span in self.training_params['span']:
                     for polyorder in self.training_params['polyorder']:
+                        print(f"checking if files exist for span {span} and polyorder {polyorder}...")
                         filenames_smoothing = ['.'.join(s.split('.')[:-1]) + f'_s{span}_p{polyorder}' + '.NCtemp'
                                                for s in filenames]
-                        if any(~os.path.isfile(f) for f in filenames_smoothing):
+                        if not all([os.path.isfile(f) for f in filenames_smoothing]):
+                            print(f"files do not exist: {[f for f in filenames_smoothing if ~os.path.isfile(f)]}") if \
+                                self.verbosity > 0 else None
                             smoothed_spectra = smooth_spectra(avg_spec, self.spec_data, span=span,
                                                               polyorder=polyorder, verbosity=self.verbosity)
                             for s, f in zip(smoothed_spectra, filenames_smoothing):
                                 if not os.path.isfile(f):
+                                    print(f"saving temporary file: {f}") if self.verbosity > 0 else None
                                     s.to_netcdf(f)
     def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected

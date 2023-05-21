@@ -91,8 +91,7 @@ def save_and_reload(spec_data, filenames):
     :param filenames: list of strings (original files that were read in)
     :return:
     """
-    list_out = [f + 'temp' for f in filenames]
-    for s, f in zip(spec_data, list_out):
+    for s, f in zip(spec_data, filenames):
         if not os.path.isfile(f):
             s.to_netcdf(f)
     spec_data = [xr.open_dataset(l, mask_and_scale=True, chunks={"time":10}) for l in list_out]
