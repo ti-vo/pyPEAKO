@@ -1,3 +1,5 @@
+import warnings
+
 import xarray as xr
 import scipy
 import numpy as np
@@ -402,9 +404,13 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
 
 
 def read_file_get_similarity(filenames_smoothing, spec_data, training_data, wth, prom, max_peaks, fill_value,
-                               verbosity, marked_peaks_index,):
+                               verbosity, marked_peaks_index):
     smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time":10})
                                                     for f in filenames_smoothing]
+    return get_similarity(smoothed_spectra, training_data, spec_data, prom, wth, max_peaks, fill_value, verbosity,
+                          marked_peaks_index)
+
+def get_similarity(smoothed_spectra, training_data, spec_data, prom, wth, max_peaks, fill_value, verbosity, marked_peaks_index):
     peako_peaks = get_peaks(smoothed_spectra, spec_data, prom, wth, max_peaks=max_peaks, fill_value=fill_value,
                                                             verbosity=verbosity,
                                                             marked_peaks_index=marked_peaks_index)
@@ -579,8 +585,9 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
 
 
 class Peako(object):
-    def __init__(self, training_data=[], optimization_method='loop',
-                  max_peaks=10, k=0, num_training_samples=None, verbosity=0, **kwargs):
+    def __init__(self, training_data=[], optimization_method='loop', multiprocessing_flag=False,
+                 temporary_files_flag=False, max_peaks=10, k=0, num_training_samples=None, save_similarities=True,
+                 verbosity=0, **kwargs):
 
         """
         initialize a Peako object
@@ -611,7 +618,9 @@ class Peako(object):
         self.spec_data = utils.mask_fill_values(self.spec_data)
         list_out = [f + 'temp' for f in self.specfiles]
         self.spec_data = utils.save_and_reload(self.spec_data, list_out)
-        #self.cleanup()
+        self.multiprocessing = multiprocessing_flag
+        self.tempfiles = temporary_files_flag
+        self.save_similarities = save_similarities
         self.optimization_method = optimization_method
         self.marked_peaks_index = []
         self.validation_index = []
@@ -622,7 +631,7 @@ class Peako(object):
         self.num_training_samples = num_training_samples
         self.fill_value = np.nan
         self.training_params = kwargs['training_params'] if 'training_params' in kwargs else \
-            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0.05, 0.3, 0.05), 'polyorder': [1, 2, 3, 4],
+            {'t_avg': range(2), 'h_avg': range(2), 'span': np.arange(0., 0.3, 0.1), 'polyorder': [2, 3, 4],
              'width': np.arange(0, 1.5, 0.5), 'prom': np.arange(0, 2.5, 0.5)}
         self.training_result = {'loop': [np.empty((1, 7))], 'DE': [np.empty((1, 7))]} if not self.k_fold_cv else {
             'loop': [np.empty((1, 7))]*self.k, 'DE': [np.empty((1, 7))]*self.k}
@@ -642,6 +651,9 @@ class Peako(object):
         if 'plot_dir' in kwargs and not os.path.exists(self.plot_dir):
             os.mkdir(self.plot_dir)
             print(f'creating directory {self.plot_dir}') if self.verbosity > 0 else None
+      #  if self.multiprocessing and not self.tempfiles:
+      #      warnings.warn("Can't use multiprocessing if temporary files flag is not set")
+      #      self.multiprocessing=False
 
     def mask_chirps(self, chirp_index: list, spec_data=False):
         """
@@ -775,32 +787,43 @@ class Peako(object):
     def train_peako_inner(self):
         """
         Train the peak finding algorithm.
-        Depending on Peako.optimization_method, looping over possible parameter combinations or an optimization toolkit
-        is used to find the combination of time and height averaging, smoothing span, minimum peak width and minimum
-        peak prominence which yields the largest similarity between user-found and algorithm-detected peaks.
-
+        peako is looping over possible all parameter combinations to find the combination of time and height
+        averaging, smoothing span, polynomial order for smoothing, minimum peak width and minimum peak prominence
+        which yields the largest similarity between user-found and algorithm-detected peaks.
         """
 
-        if self.optimization_method == 'loop':
+        if self.tempfiles:
             self.write_temporary_files()
-            similarity_array = np.full([len(self.training_params[key]) for key in self.training_params.keys()], np.nan)
-            for i, t_avg in enumerate(self.training_params['t_avg']):
-                for j, h_avg in enumerate(self.training_params['h_avg']):
-                    for k, span in enumerate(self.training_params['span']):
-                        for l, polyorder in enumerate(self.training_params['polyorder']):
-                            filenames_smoothing = [
-                                '.'.join(s.split('.')[:-1]) + f'_t{t_avg}_h{h_avg}_s{span}_p{polyorder}' + '.NCtemp'
-                                for s in self.specfiles]
+        similarity_array = np.full([len(self.training_params[key]) for key in self.training_params.keys()], np.nan)
+        for i, t_avg in enumerate(self.training_params['t_avg']):
+            for j, h_avg in enumerate(self.training_params['h_avg']):
+                if not self.tempfiles:
+                    avg_spec = average_spectra(self.spec_data, t_avg=t_avg, h_avg=h_avg)
+                for k, span in enumerate(self.training_params['span']):
+                    for l, polyorder in enumerate(self.training_params['polyorder']):
+                        if self.tempfiles:
+                            filenames_smoothing = ['.'.join(s.split('.')[:-1]) + f'_t{t_avg}_h{h_avg}_s{span}_p{polyorder}' + '.NCtemp'
+                            for s in self.specfiles]
+                        else:
+                            smoothed_spectra = smooth_spectra(avg_spec, self.spec_data, span=span,polyorder=polyorder,
+                                                verbosity=self.verbosity)
+                        if self.multiprocessing:
+                            if self.tempfiles:
+                                arguments = [
+                                    (filenames_smoothing, self.spec_data, self.training_data, width, prom, self.max_peaks,
+                                     self.fill_value, self.verbosity, self.marked_peaks_index[self.current_k]) for
+                                    width in self.training_params['width'] for prom in self.training_params['prom']]
+                            else:
+                                arguments = [(smoothed_spectra, self.training_data, self.spec_data, prom, wth,
+                                             self.max_peaks, self.fill_value, self.verbosity,
+                                             self.marked_peaks_index[self.current_k]) for wth in
+                                             self.training_params['width'] for prom in self.training_params['prom']]
 
-                            arguments = [
-                                (filenames_smoothing, self.spec_data, self.training_data, width, prom, self.max_peaks,
-                                 self.fill_value, self.verbosity, self.marked_peaks_index[self.current_k])
-                                for width in self.training_params['width'] for prom in
-                                self.training_params['prom']]
-                            num_workers = len(arguments) if len(arguments) < mp.cpu_count() else mp.cpu_count()
+                            num_workers = 4 #len(arguments) if len(arguments) < mp.cpu_count() else mp.cpu_count()
                             print(f"pool of {num_workers} subprocesses...") if self.verbosity > 0 else None
                             with mp.Pool(num_workers) as pool:
-                                result = pool.starmap(read_file_get_similarity, arguments)
+                                result = pool.starmap(read_file_get_similarity, arguments) if self.tempfiles else \
+                                    pool.starmap(get_similarity, arguments)
                                 wp_list = [(w, p) for w in range(len(self.training_params['width'])) for p in
                                            range(len(self.training_params['prom']))]
                             for m, r in enumerate(result):
@@ -815,43 +838,45 @@ class Peako(object):
                                 if self.verbosity > 0:
                                     print(f"similarity: {similarity}, t:{t_avg}, h:{h_avg}, span:{span}, "
                                           f"polyorder: {polyorder}, width:{wth}, prom:{prom}")
+                        else:
+                            smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time":10})
+                                                for f in filenames_smoothing] if self.tempfiles else \
+                                smooth_spectra(avg_spec, self.spec_data, span=span,polyorder=polyorder,
+                                                verbosity=self.verbosity)
+                            for m, wth in enumerate(self.training_params['width']):
+                                for n, prom in enumerate(self.training_params['prom']):
+                                    peako_peaks = get_peaks(smoothed_spectra, self.spec_data, prom, wth,
+                                                    max_peaks=self.max_peaks, fill_value=self.fill_value,
+                                                    verbosity=self.verbosity,
+                                                    marked_peaks_index=self.marked_peaks_index[self.current_k])
+                                    similarity = self.area_peaks_similarity(peako_peaks, array_out=False)
+                                    similarity_array[i, j, k, l, m, n] = similarity
+                                    self.training_result['loop'][self.current_k] = \
+                                        np.append(self.training_result['loop'][self.current_k],
+                                                       [[t_avg, h_avg, span, polyorder, wth, prom, similarity]], axis=0)
+                                    if self.verbosity > 0:
+                                        print(f"similarity: {similarity}, t:{t_avg}, h:{h_avg}, span:{span}, "
+                                              f"polyorder: {polyorder}, width:{wth}, prom:{prom}")
+        # remove the first line from the training result
+        self.training_result['loop'][self.current_k] = np.delete(self.training_result['loop'][self.current_k], 0,
+                                                                 axis=0)
+        # save the similarity array to a file
+        if self.save_similarities:
+            (xr.Dataset({'similarities': xr.DataArray(similarity_array, self.training_params)})).to_netcdf(
+                path=f'{self.plot_dir}peako_similarities_k{self.current_k}.nc')
 
-            # remove the first line from the training result
-            self.training_result['loop'][self.current_k] = np.delete(self.training_result['loop'][self.current_k], 0,
-                                                                     axis=0)
-
-            # extract the three parameter combinations yielding the maximum in similarity
-            t, h, s, po, w, pr = np.unravel_index(np.argsort(similarity_array, axis=None)[-3:][::-1], similarity_array.shape)
-            return {'training result': [{'t_avg': self.training_params['t_avg'][ti],
-                    'h_avg': self.training_params['h_avg'][hi],
-                    'span': self.training_params['span'][si],
-                    'polyorder': self.training_params['polyorder'][poi],
-                    'width': self.training_params['width'][wi],
-                    'prom': self.training_params['prom'][pri],
-                    'similarity': np.sort(similarity_array, axis=None)[-(i+1)]}
-                    for i, (ti, hi, si, poi, wi, pri) in enumerate(zip(t, h, s, po, w, pr))]}
+        # extract the three parameter combinations yielding the maximum similarity
+        t, h, s, po, w, pr = np.unravel_index(np.argsort(similarity_array, axis=None)[-3:][::-1], similarity_array.shape)
+        return {'training result': [{'t_avg': self.training_params['t_avg'][ti],
+                'h_avg': self.training_params['h_avg'][hi],
+                'span': self.training_params['span'][si],
+                'polyorder': self.training_params['polyorder'][poi],
+                'width': self.training_params['width'][wi],
+                'prom': self.training_params['prom'][pri],
+                'similarity': np.sort(similarity_array, axis=None)[-(i+1)]}
+                for i, (ti, hi, si, poi, wi, pri) in enumerate(zip(t, h, s, po, w, pr))]}
 
 
-        elif self.optimization_method == 'DE':
-            bounds = [(min(self.training_params['t_avg']), max(self.training_params['t_avg'])),
-                      (min(self.training_params['h_avg']), max(self.training_params['h_avg'])),
-                      (np.log10(min(self.training_params['span'])), np.log10(max(self.training_params['span']))),
-                      (min(self.training_params['width']), max(self.training_params['width'])),
-                      (min(self.training_params['prom']), max(self.training_params['prom']))]
-            disp = True if self.verbosity > 0 else False
-            result_de = differential_evolution(self.fun_to_minimize, bounds=bounds, disp=disp, workers=8)
-
-            # remove the first line from the training result
-            self.training_result['DE'][self.current_k] = np.delete(self.training_result['DE'][self.current_k], 0,
-                                                                   axis=0)
-            # create dictionary
-            result = {'t_avg': result_de['x'][0],
-                      'h_avg': int(result_de['x'][1]),
-                      'span': result_de['x'][2],
-                      'width': result_de['x'][3],
-                      'prom': result_de['x'][4],
-                      'similarity': result_de['x'][5]}
-            return result
 
     def write_temporary_files(self):
         for t_avg in self.training_params['t_avg']:
@@ -993,8 +1018,8 @@ class Peako(object):
                         print('finding peaks for all times and ranges...')
 
                         self.peako_peaks_training[j][k] = average_smooth_detect(self.spec_data, t_avg=int(t),
-                                                                                h_avg=int(h), span=s, width=w, prom=p,
-                                                                                polyorder=self.polyorder,
+                                                                                h_avg=int(h), span=s, width=w, prom=pr,
+                                                                                polyorder=po,
                                                                                 max_peaks=self.max_peaks,
                                                                                 fill_value=self.fill_value,
                                                                                 all_spectra=True)
@@ -1207,10 +1232,10 @@ class Peako(object):
 
                 if plot_smoothed:
                     i_max = np.argmax(self.training_result[j][k][:, -1])
-                    t, h, s, w, p = self.training_result[j][k][i_max, :-1]
+                    t, h, s, po, w, pr = self.training_result[j][k][i_max, :-1]
                     avg_spectra = average_spectra(self.spec_data, int(t), int(h))
                     #avg_spectrum = avg_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
-                    smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, self.polyorder,
+                    smoothed_spectra = smooth_spectra(avg_spectra, self.spec_data, s, po,
                                                       verbosity=self.verbosity)
                     smoothed_spectrum = smoothed_spectra[f]['doppler_spectrum'].values[t_ind[i], h_ind[i], :]
                     ax.plot(velbins, utils.lin2z(smoothed_spectrum), linestyle='-', linewidth=0.7, label='smoothed spectrum')
