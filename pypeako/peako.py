@@ -109,8 +109,8 @@ def find_edges(spectrum, fill_value, peak_locations):
         else:
             right_edge = closest_below_noise_right
 
-        left_edges.append(np.int(left_edge))
-        right_edges.append(np.int(right_edge))
+        left_edges.append(int(left_edge))
+        right_edges.append(int(right_edge))
 
     return left_edges, right_edges
 
@@ -493,12 +493,13 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
                 # experimental: Fill with minimum value
                 min_vals = np.tile(np.nanmin(spec_chunk, axis=2)[:, :, np.newaxis], (1, 1, spec_chunk.shape[2]))
                 spec_chunk[nanmask] = min_vals[nanmask]
-                spectra_out[f][:, r_ind[0]: r_ind[1], :] = scipy.signal.savgol_filter(
-                    spec_chunk, window_length, polyorder=polyorder, axis=2, mode='nearest')
+                spec_chunk = scipy.signal.savgol_filter(utils.lin2z(spec_chunk),
+                                                        window_length, polyorder=polyorder, axis=2, mode='nearest')
+                spectra_out[f][:, r_ind[0]: r_ind[1], :] = utils.z2lin(spec_chunk)
                 # experimental: fill smoothed spectra "gaps" with raw spectrum values
                 # TODO maybe this causes the spurious peaks at the flanks of the spectra?
-                gaps = (spectra_out[f][:, r_ind[0]: r_ind[1], :] <= 0.) & ~nanmask
-                spectra_out[f][:, r_ind[0]: r_ind[1], :][gaps] = spec_chunk[gaps]
+                #gaps = (spectra_out[f][:, r_ind[0]: r_ind[1], :] <= 0.) & ~nanmask
+                #spectra_out[f][:, r_ind[0]: r_ind[1], :][gaps] = spec_chunk[gaps]
                 # spectra_out[f]['doppler_spectrum'].values[:, r_ind[0]: r_ind[1], :][nanmask] = np.nan
 
     return [xr.Dataset(data_vars={'doppler_spectrum': xr.DataArray(s, dims=['time', 'range', 'spectrum'],
@@ -630,9 +631,9 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
             if all_spectra:
 
                 peaks_all_spectra = xr.apply_ufunc(peak_detection_dask, spectra[f]['doppler_spectrum'][:,
-                                                                        r_ind[0]: r_ind[1], :],
+                                                                        r_ind[0]: r_ind[1], :].values,
                                                    prom, fill_value, width_thresh, max_peaks, dask='parallelized')
-                peaks_array['PeakoPeaks'].data[:, r_ind[0]: r_ind[1], :] = peaks_all_spectra.data[:, :, 0:max_peaks]
+                peaks_array['PeakoPeaks'].data[:, r_ind[0]: r_ind[1], :] = peaks_all_spectra[:, :, 0:max_peaks]
 
             else:
                 assert 'marked_peaks_index' in kwargs, "if param all_spectra is set to False, you have to supply " \
@@ -719,7 +720,7 @@ class Peako(object):
         """
         self.training_files = training_data
         self.training_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in training_data]
-        self.specfiles = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
+        self.specfiles = kwargs['specfiles'] if 'specfiles' in kwargs else ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
         self.spec_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in self.specfiles]
         self.spec_data = [s.load() for s in self.spec_data]
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
@@ -858,14 +859,14 @@ class Peako(object):
                 self.validation_index = validation_index
                 self.marked_peaks_index = marked_peaks_index
 
-    def train_peako(self):
+    def train_peako(self, **kwargs):
         """
             training peako: If k is set to a value > 0 loop over k folds
         """
 
         self.create_training_mask()
         if not self.k_fold_cv:
-            result = self.train_peako_inner()
+            result = self.train_peako_inner(**kwargs)
             print(f'number of samples: {self.get_training_sample_number()}')
             return result
         else:
@@ -874,7 +875,7 @@ class Peako(object):
             self.current_k = 0
             max_sim = self.compute_maximum_similarity(mode='validation')
             for k in range(self.k):
-                result = self.train_peako_inner()['training result'][0]
+                result = self.train_peako_inner(**kwargs)['training result'][0]
 
                 if self.tempfiles:
                     filenames_smoothing = ['.'.join(s.split('.')[
@@ -904,7 +905,7 @@ class Peako(object):
             self.current_k = 0
             return result_list_out
 
-    def train_peako_inner(self):
+    def train_peako_inner(self, **kwargs):
         """
         Train the peak finding algorithm.
         peako is looping over possible all parameter combinations to find the combination of time and height
@@ -984,8 +985,10 @@ class Peako(object):
                                                                  axis=0)
         # save the similarity array to a file
         if self.save_similarities:
+            outfile_name = f'{self.plot_dir}{kwargs["filename_similarities"]}' if 'filename_similarities' in kwargs \
+                else f'{self.plot_dir}peako_similarities_k{self.current_k}.nc'
             (xr.Dataset({'similarities': xr.DataArray(similarity_array, self.training_params)})).to_netcdf(
-                path=f'{self.plot_dir}peako_similarities_k{self.current_k}.nc')
+                path=outfile_name)
 
         # extract the three parameter combinations yielding the maximum similarity
         t, h, s, po, w, pr = np.unravel_index(np.argsort(similarity_array, axis=None)[-3:][::-1],
@@ -1013,7 +1016,8 @@ class Peako(object):
 
                 for span in self.training_params['span']:
                     for polyorder in self.training_params['polyorder']:
-                        print(f"checking if files exist for span {span} and polyorder {polyorder}...")
+                        if self.verbosity > 0:
+                            print(f"checking if files exist for span {span} and polyorder {polyorder}...")
                         filenames_smoothing = ['.'.join(s.split('.')[:-1]) + f'_s{span}_p{polyorder}' + '.NCtemp'
                                                for s in filenames]
                         if not all([os.path.isfile(f) for f in filenames_smoothing]):
@@ -1061,11 +1065,12 @@ class Peako(object):
                 user_peaks = np.unique(user_peaks[~np.isnan(user_peaks)])
                 # convert velocities to indices
                 user_peaks = np.asarray([utils.argnearest(velbins_per_bin[h, :], val) for val in user_peaks])
+                user_peaks = np.unique(user_peaks)
+                user_peaks.sort()
                 spectrum = s_data[f]['doppler_spectrum'].isel(time=t, range=h).values
                 spectrum_db = utils.lin2z(spectrum)
                 spectrum_db[np.isnan(spectrum_db)] = 0.0
                 spectrum_db[spectrum == self.fill_value] = 0.0
-                user_peaks.sort()
                 peako_peaks = algorithm_peaks[f]['PeakoPeaks'].values[t, h, :]
                 peako_peaks = np.unique(peako_peaks[peako_peaks > 0])
                 peako_peaks.sort()
@@ -1130,7 +1135,7 @@ class Peako(object):
                     if len(self.peako_peaks_training[j][k]) == 0:
                         print('finding peaks for all times and ranges...')
                         if self.tempfiles:
-                            filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
+                            filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' + '.NCtemp'
                                                    for sp in self.specfiles]
                             print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
                             smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
@@ -1258,7 +1263,7 @@ class Peako(object):
                 peaks_dataset = xr.Dataset()
                 peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
                     t_data[f]['peaks'].values.shape,
-                    np.nan, dtype=np.int), dims=['time', 'range', 'peaks'])})
+                    np.nan, dtype=int), dims=['time', 'range', 'peaks'])})
                 for c in range(len(t_data[f].chirp)):
                     velbins = s_data[f]['velocity_vectors'].values[c, :]
                     r_ind = utils.get_chirp_offsets(s_data[f])[c:c + 2]
@@ -1299,6 +1304,8 @@ class Peako(object):
         """
 
         from mpl_toolkits.mplot3d import Axes3D
+        # parameters = ["t_avg", "h_avg", "span", "polyorder", "wth", "prom"]
+        # TODO time and height might be switched here
 
         training_result = self.training_result[key][k]
         fig, ax = plt.subplots(2, 2, subplot_kw=dict(projection='3d'))
@@ -1314,13 +1321,13 @@ class Peako(object):
         ax[1, 1].set_ylabel('span')
         ax[1, 1].set_zlabel('similarity')
 
-        ax[0, 1].scatter(training_result[:, 4], training_result[:, 3], training_result[:, -1], zdir='z',
+        ax[0, 1].scatter(training_result[:, 5], training_result[:, 3], training_result[:, -1], zdir='z',
                          c=training_result[:, -1], cmap='seismic')
         ax[0, 1].set_xlabel('prom')
         ax[0, 1].set_ylabel('polyorder')
         ax[0, 1].set_zlabel('similarity')
 
-        ax[1, 0].scatter(training_result[:, 4], training_result[:, 1], training_result[:, -1], zdir='z',
+        ax[1, 0].scatter(training_result[:, 5], training_result[:, 1], training_result[:, -1], zdir='z',
                          c=training_result[:, -1], cmap='seismic')
         ax[1, 0].set_xlabel('prom')
         ax[1, 0].set_ylabel('time averages')
@@ -1334,6 +1341,7 @@ class Peako(object):
         of the training results in the Peako.peako_peaks_training dictionary.
 
         :param kwargs: 'seed' : set seed to an integer number for reproducibility
+                       'plot_smoothed' : bool, should the smoothed spectrum be plotted as well?
         :return: fig, ax (matplotlib.pyplot.suplots() objects)
         """
 
@@ -1454,12 +1462,21 @@ class Peako(object):
             if self.tempfiles:
                 filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
                                        for sp in self.specfiles]
-                smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
+                try:
+                    smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                     for f in filenames_smoothing]
-                algorithm_peaks = get_peaks(smoothed_spectra, self.spec_data, pr, w,
+                    algorithm_peaks = get_peaks(smoothed_spectra, self.spec_data, pr, w,
                                             max_peaks=self.max_peaks, fill_value=self.fill_value,
                                             verbosity=self.verbosity,
                                             marked_peaks_index=m_p_i)
+                except:
+                    if self.verbosity > 0:
+                        print('temporary files not found, setting tempfiles to False')
+                    algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
+                                                            width=w, prom=pr, polyorder=po,
+                                                            fill_value=self.fill_value, max_peaks=self.max_peaks,
+                                                            all_spectra=False, marked_peaks_index=m_p_i)
+                    self.tempfiles = False
 
             else:
                 algorithm_peaks = average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,

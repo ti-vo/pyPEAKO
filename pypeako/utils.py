@@ -13,6 +13,17 @@ codes = np.concatenate([circle.codes, star.codes])
 cut_star = matplotlib.path.Path(verts, codes)
 
 
+def z2lin(array):
+    """
+    convert dB values to linear space (for np.array or single number)
+    :param array: np.array or single number
+    :return:
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out = 10**(array/10)
+        return out
+
 def lin2z(array):
     """
     convert linear values to dB (for np.array or single number)
