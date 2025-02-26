@@ -1391,8 +1391,9 @@ class Peako(object):
                     i_max = np.argmax(self.training_result[j][k][:, -1])
                     t, h, s, po, w, pr = self.training_result[j][k][i_max, :-1]
                     if self.tempfiles:
-                        filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
-                                               for sp in self.specfiles]
+                        filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' +
+                                               '.NCtemp' for sp in self.specfiles]
+                        print(f'trying to read in files: {filenames_smoothing}') if self.verbosity > 0 else None
                         smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                             for f in filenames_smoothing]
 
