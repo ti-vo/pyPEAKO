@@ -1893,7 +1893,7 @@ class TrainingData(object):
     def input_peak_locations_jupyter(self, n_file, t_range, r_range, plot_smoothed, **kwargs):
         peakVals = []
         peakPowers = []
-        from ipywidgets import ToggleButton, VBox, Output, AppLayout
+        from ipywidgets import ToggleButton, HBox, Output, AppLayout
         from IPython.display import display  # Correct import for display
 
         self.heightindex_center = random.randint(r_range[0], r_range[1])
@@ -1923,6 +1923,14 @@ class TrainingData(object):
                 button_style='',
                 tooltip='Next spec',
                 icon='forward'  # Checkmark icon
+            )
+            finish = ToggleButton(
+                value=False,
+                description='Finish',
+                disabled=False,
+                button_style='',
+                tooltip='Finish marking',
+                icon='check'  # Checkmark icon
             )
 
             # Output widget to display messages
@@ -1960,17 +1968,31 @@ class TrainingData(object):
                 self.fig, self.ax = ret
                 self.fig.canvas.draw()
                 self.fig.canvas.flush_events()
+                
+            def onfinish(change):
+                for dim1 in range(3):
+                    for dim2 in range(3):
+                        self.ax[dim1, dim2].clear()
+
+                # update the vals
+                xvals = [e[0] for e in self.all_markings[-1]]
+                self.training_data_out[n_file][self.timeindex_center, self.heightindex_center, 0:len(xvals)] = xvals
+                self.plot_count[n_file] = len(self.all_markings)
+                # self.all_markings = [[]]
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
 
 
             # Add the callback events
             toggle.observe(ontoggle, names='value')
+            finish.observe(onfinish, names='value')
             cid = fig.canvas.mpl_connect('button_press_event', onclick)
 
             # Show the plot
             AL = AppLayout(
                 #header=output,
                 center=fig.canvas,
-                footer=toggle,
+                footer=HBox([toggle, finish]),
                 pane_heights=[0, 6, 0.5]
             )
             return AL
