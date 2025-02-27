@@ -1725,6 +1725,74 @@ class TrainingData(object):
                     s += 1
                     self.plot_count[n] = s
 
+    def mark_random_spectra_jupyter(self, plot_smoothed=False, **kwargs):
+        """
+        Mark random spectra in TrainingData.spec_data (number of randomly drawn spectra in time-height space defined by
+        TrainingData.num_spec) and save x and y locations
+        :param kwargs:
+               num_spec: update TrainingData.num_spec
+               span: span for smoothing. Required if plot_smoothed=True
+        """
+
+        if 'num_spec' in kwargs:
+            self.num_spec[:] = kwargs['num_spec']
+
+        closeby = kwargs['closeby'] if 'closeby' in kwargs else np.repeat(None, len(self.spec_data))
+
+        self.all_markings = [[]]
+
+        assert len(self.spec_data) == 1, 'jupyter not implemented for multiple files'
+        n = 0 # only the first file for now
+
+        if closeby[n] is not None:
+            tind = utils.get_closest_time(closeby[n][0], self.spec_data[n].time)
+            tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
+            rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
+            rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
+        else:
+            tind = (1, self.tdim[n] - 1)
+            rind = (1, self.rdim[n] - 1)
+        #while s < self.num_spec[n]:
+
+        # modify the function call slightly
+        print('possible range indices',  rind)
+        print(self.spec_data[n]['chirp_start_indices'].values)
+        print(kwargs['chirp']) if 'chirp' in kwargs else None
+        
+        kwargs['chirp'] = 1
+        if 'chirp' in kwargs:
+            n_rg = self.spec_data[n]['chirp_start_indices']
+            range_chirp_mapping = np.repeat(
+                np.arange(len(n_rg)), np.diff(np.hstack((n_rg, len(self.spec_data[n].range)))))
+            inds = np.where(range_chirp_mapping == 1)[0]
+            rind = (max(rind[0],int(inds[0])+1), min(rind[1],int(inds[-1])-1))
+            print('new rind', rind)
+
+        return self.input_peak_locations_jupyter(n, tind, rind, plot_smoothed)
+
+        for n in range(len(self.spec_data)):
+            s = 0
+            if closeby[n] is not None:
+                tind = utils.get_closest_time(closeby[n][0], self.spec_data[n].time)
+                tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
+                rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
+                rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
+            else:
+                tind = (1, self.tdim[n] - 1)
+                rind = (1, self.rdim[n] - 1)
+            #while s < self.num_spec[n]:
+            random_index_t = random.randint(tind[0], tind[1])
+            random_index_r = random.randint(rind[0], rind[1])
+            if self.verbosity > 1:
+                print(f'r: {random_index_r}, t: {random_index_t}')
+            
+
+            if not np.all(np.isnan(vals)):
+                self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
+                s += 1
+                self.plot_count[n] = s
+    
+
     def input_peak_locations(self, n_file, t_index, r_index, plot_smoothed, **kwargs):
         """
         :param n_file: the index of the netcdf file from which to mark spectrum by hand
@@ -1740,9 +1808,6 @@ class TrainingData(object):
         # TODO replace with utils.get_chirp_offsets
         n_rg = self.spec_data[n_file]['chirp_start_indices']
         c_ind = np.digitize(r_index, n_rg)
-        if "chirp" in kwargs:
-            if not c_ind == kwargs['chirp']:
-                return np.nan, np.nan
         # print(f'range index {r_index} is in chirp {c_ind} with ranges in chirps {n_rg[1:]}')
 
         heightindex_center = r_index
@@ -1825,101 +1890,124 @@ class TrainingData(object):
             return np.nan, np.nan
 
 
-    def input_peak_locations_jupyter(self, n_file, t_index, r_index, plot_smoothed, **kwargs):
+    def input_peak_locations_jupyter(self, n_file, t_range, r_range, plot_smoothed, **kwargs):
         peakVals = []
         peakPowers = []
-        from ipywidgets import ToggleButton, VBox, Output
+        from ipywidgets import ToggleButton, VBox, Output, AppLayout
         from IPython.display import display  # Correct import for display
 
-        # Replace with utils.get_chirp_offsets
-        n_rg = self.spec_data[n_file]['chirp_start_indices']
-        c_ind = np.digitize(r_index, n_rg)
-        if "chirp" in kwargs:
-            if not c_ind == kwargs['chirp']:
-                return np.nan, np.nan
-
-        heightindex_center = r_index
-        timeindex_center = t_index
-        this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(timeindex_center),
-                               int(heightindex_center), :]
+        self.heightindex_center = random.randint(r_range[0], r_range[1])
+        self.timeindex_center = random.randint(t_range[0], t_range[1])
+        this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(self.timeindex_center),
+                               int(self.heightindex_center), :]
 
         if not np.sum(~np.isnan(this_spectrum_center.values)) < 2:
-            velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
-            xlim = velbins.values[~np.isnan(this_spectrum_center.values) & ~(this_spectrum_center.values == 0)][
-                [0, -1]]
-            xlim += [-1, +1]  # Extend limits for better visibility
-
             # Create figure and subplots
             plt.close('all')
-            fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
+            # somehow that context is needed to not double display the plot
+            with plt.ioff():
+                fig, ax = plt.subplots(3, 3, figsize=[8, 8], sharex=True, sharey=True)
+            fig.canvas.toolbar_visible = False
+            fig.canvas.header_visible = False
             fig.suptitle(f'Mark peaks in the center panel spectrum. Fig. {self.plot_count[n_file] + 1} out of '
                          f'{self.num_spec[n_file]}; File {n_file + 1} of {len(self.spec_data)}',
-                         size='xx-large', fontweight='semibold')
+                         size='x-large', fontweight='semibold')
 
-            # Plot all subplots
-            for dim1 in range(3):
-                for dim2 in range(3):
-                    if not (dim1 == 1 and dim2 == 1):
-                        heightindex = r_index - 1 + dim1
-                        timeindex = t_index - 1 + dim2
-
-                        thisSpectrum = self.spec_data[n_file]['doppler_spectrum'][int(timeindex), int(heightindex),
-                                       :]
-
-                        ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
-                        ax[dim1, dim2].set_xlim(xlim)
-                        ax[dim1, dim2].grid(True)
-
-            # Plot center panel
-            ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw', color='r')
-            ax[1, 1].grid(True)
-            ax[1, 1].legend()
+            self.fig, self.ax = self.update_subplots(fig, ax, this_spectrum_center, self.heightindex_center, self.timeindex_center, n_file)
 
             # Toggle button for finishing marking
             toggle = ToggleButton(
                 value=False,
-                description='Finish',
+                description='Next spec',
                 disabled=False,
                 button_style='',
-                tooltip='Finish marking peaks',
-                icon='check'  # Checkmark icon
+                tooltip='Next spec',
+                icon='forward'  # Checkmark icon
             )
 
             # Output widget to display messages
             output = Output()
 
-            # Global variable for peak markings
-            global all_markings
-            all_markings = [[]]  # List to store peak values
-
             # Define callback for clicking on the plot
             def onclick(event):
+                with output:
+                    output.clear_output()
+                    print(f"click at : {event.xdata}{event.ydata} in? {event.inaxes== ax[1, 1]}")
                 if event.inaxes == ax[1, 1]:  # Only allow clicks in center panel
-                    ax.scatter(event.xdata, event.ydata, color='black')  # Mark the peak
-                    all_markings[-1].append([event.xdata, event.ydata])  # Save the peak
+                    ax[1,1].scatter(event.xdata, event.ydata, color='black', zorder=2, marker='x')  # Mark the peak
+                    self.all_markings[-1].append([event.xdata, event.ydata])  # Save the peak
                     fig.canvas.draw()  # Redraw the figure to update the plot
+        
 
             # Define callback for toggle button
             def ontoggle(change):
-                if change['new']:
-                    toggle.value = False  # Reset the button
-                    plt.close(fig)  # Close the plot
-                    with output:
-                        print(f"Final peak values: {all_markings[-1]}")  # Output peak values
+                for dim1 in range(3):
+                    for dim2 in range(3):
+                        self.ax[dim1, dim2].clear()
+
+                # update the vals
+                xvals = [e[0] for e in self.all_markings[-1]]
+                self.training_data_out[n_file][self.timeindex_center, self.heightindex_center, 0:len(xvals)] = xvals
+                self.plot_count[n_file] = len(self.all_markings)
+                self.all_markings.append([])
+                
+                # next spectrum...
+                self.heightindex_center = random.randint(r_range[0], r_range[1])
+                self.timeindex_center = random.randint(t_range[0], t_range[1])
+                this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(self.timeindex_center),
+                                       int(self.heightindex_center), :]
+                ret = self.update_subplots(self.fig, self.ax, this_spectrum_center, self.heightindex_center, self.timeindex_center, n_file)
+                self.fig, self.ax = ret
+                self.fig.canvas.draw()
+                self.fig.canvas.flush_events()
+
 
             # Add the callback events
             toggle.observe(ontoggle, names='value')
             cid = fig.canvas.mpl_connect('button_press_event', onclick)
 
             # Show the plot
-            plt.show()
-
-            # Display the button and output together
-            display(VBox([output, toggle]))
+            AL = AppLayout(
+                #header=output,
+                center=fig.canvas,
+                footer=toggle,
+                pane_heights=[0, 6, 0.5]
+            )
+            return AL
+        
             vals = [point for marking in all_markings for point in marking]
             print(vals)
             return vals, peakPowers  # Return all marked peaks
 
+    def update_subplots(self, fig, ax, this_spectrum_center, r_index, t_index, n_file):
+        # Plot all subplots
+        n_rg = self.spec_data[n_file]['chirp_start_indices']
+        c_ind = np.digitize(self.heightindex_center, n_rg)
+        velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
+        xlim = velbins.values[~np.isnan(this_spectrum_center.values) & ~(this_spectrum_center.values == 0)][
+                [0, -1]]
+        xlim += [-1, +1]  # Extend limits for better visibility
+        for dim1 in range(3):
+            for dim2 in range(3):
+                if not (dim1 == 1 and dim2 == 1):
+                    heightindex = r_index - 1 + dim1
+                    timeindex = t_index - 1 + dim2
+
+                    thisSpectrum = self.spec_data[n_file]['doppler_spectrum'][int(timeindex), int(heightindex),
+                                   :]
+
+                    ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
+                    ax[dim1, dim2].set_xlim(xlim)
+                    ax[dim1, dim2].grid(True)
+                ax[dim1, dim2].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
+                ax[dim1, dim2].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
+
+        # Plot center panel
+        ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw', color='r')
+        ax[1, 1].grid(True)
+        ax[1, 1].legend()
+        return fig, ax
+        
 
 
     def save_training_data(self):
