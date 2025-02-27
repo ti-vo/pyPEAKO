@@ -1720,7 +1720,7 @@ class TrainingData(object):
                     vals, _ = self.input_peak_locations_jupyter(n, random_index_t, random_index_r, plot_smoothed)
                 else:
                     vals, _ = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
-                if len(vals) > 0 and not np.all(np.isnan(vals)):
+                if not np.all(np.isnan(vals)):
                     self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
                     s += 1
                     self.plot_count[n] = s
@@ -1916,8 +1916,9 @@ class TrainingData(object):
 
             # Display the button and output together
             display(VBox([output, toggle]))
-
-            return [point for marking in all_markings for point in marking], peakPowers  # Return all marked peaks
+            vals = [point for marking in all_markings for point in marking]
+            print(vals)
+            return vals, peakPowers  # Return all marked peaks
 
 
 
