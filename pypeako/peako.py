@@ -1716,8 +1716,11 @@ class TrainingData(object):
                 random_index_r = random.randint(rind[0], rind[1])
                 if self.verbosity > 1:
                     print(f'r: {random_index_r}, t: {random_index_t}')
-                vals, powers = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
-                if not np.all(np.isnan(vals)):
+                if 'jupyter' in kwargs and kwargs['jupyter']:
+                    vals, _ = self.input_peak_locations_jupyter(n, random_index_t, random_index_r, plot_smoothed)
+                else:
+                    vals, _ = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
+                if len(vals) > 0 and not np.all(np.isnan(vals)):
                     self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
                     s += 1
                     self.plot_count[n] = s
@@ -1727,6 +1730,7 @@ class TrainingData(object):
         :param n_file: the index of the netcdf file from which to mark spectrum by hand
         :param t_index: the time index of the spectrum
         :param r_index: the range index of the spectrum
+        :param plot_smoothed: bool, display smoothed spectrum if True
         :return peakVals: The x values (in units of Doppler velocity) of the marked peaks
         :return peakPowers: The y values (in units of dBZ) of the marked peaks
         """
@@ -1819,6 +1823,103 @@ class TrainingData(object):
             return peakVals, peakPowers
         else:
             return np.nan, np.nan
+
+
+    def input_peak_locations_jupyter(self, n_file, t_index, r_index, plot_smoothed, **kwargs):
+        peakVals = []
+        peakPowers = []
+        from ipywidgets import ToggleButton, VBox, Output
+        from IPython.display import display  # Correct import for display
+
+        # Replace with utils.get_chirp_offsets
+        n_rg = self.spec_data[n_file]['chirp_start_indices']
+        c_ind = np.digitize(r_index, n_rg)
+        if "chirp" in kwargs:
+            if not c_ind == kwargs['chirp']:
+                return np.nan, np.nan
+
+        heightindex_center = r_index
+        timeindex_center = t_index
+        this_spectrum_center = self.spec_data[n_file]['doppler_spectrum'][int(timeindex_center),
+                               int(heightindex_center), :]
+
+        if not np.sum(~np.isnan(this_spectrum_center.values)) < 2:
+            velbins = self.spec_data[n_file]['velocity_vectors'][c_ind - 1, :]
+            xlim = velbins.values[~np.isnan(this_spectrum_center.values) & ~(this_spectrum_center.values == 0)][
+                [0, -1]]
+            xlim += [-1, +1]  # Extend limits for better visibility
+
+            # Create figure and subplots
+            plt.close('all')
+            fig, ax = plt.subplots(3, 3, figsize=[11, 11], sharex=True, sharey=True)
+            fig.suptitle(f'Mark peaks in the center panel spectrum. Fig. {self.plot_count[n_file] + 1} out of '
+                         f'{self.num_spec[n_file]}; File {n_file + 1} of {len(self.spec_data)}',
+                         size='xx-large', fontweight='semibold')
+
+            # Plot all subplots
+            for dim1 in range(3):
+                for dim2 in range(3):
+                    if not (dim1 == 1 and dim2 == 1):
+                        heightindex = r_index - 1 + dim1
+                        timeindex = t_index - 1 + dim2
+
+                        thisSpectrum = self.spec_data[n_file]['doppler_spectrum'][int(timeindex), int(heightindex),
+                                       :]
+
+                        ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
+                        ax[dim1, dim2].set_xlim(xlim)
+                        ax[dim1, dim2].grid(True)
+
+            # Plot center panel
+            ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw', color='r')
+            ax[1, 1].grid(True)
+            ax[1, 1].legend()
+
+            # Toggle button for finishing marking
+            toggle = ToggleButton(
+                value=False,
+                description='Finish',
+                disabled=False,
+                button_style='',
+                tooltip='Finish marking peaks',
+                icon='check'  # Checkmark icon
+            )
+
+            # Output widget to display messages
+            output = Output()
+
+            # Global variable for peak markings
+            global all_markings
+            all_markings = [[]]  # List to store peak values
+
+            # Define callback for clicking on the plot
+            def onclick(event):
+                if event.inaxes == ax[1, 1]:  # Only allow clicks in center panel
+                    ax.scatter(event.xdata, event.ydata, color='black')  # Mark the peak
+                    all_markings[-1].append([event.xdata, event.ydata])  # Save the peak
+                    fig.canvas.draw()  # Redraw the figure to update the plot
+
+            # Define callback for toggle button
+            def ontoggle(change):
+                if change['new']:
+                    toggle.value = False  # Reset the button
+                    plt.close(fig)  # Close the plot
+                    with output:
+                        print(f"Final peak values: {all_markings[-1]}")  # Output peak values
+
+            # Add the callback events
+            toggle.observe(ontoggle, names='value')
+            cid = fig.canvas.mpl_connect('button_press_event', onclick)
+
+            # Show the plot
+            plt.show()
+
+            # Display the button and output together
+            display(VBox([output, toggle]))
+
+            return [point for marking in all_markings for point in marking], peakPowers  # Return all marked peaks
+
+
 
     def save_training_data(self):
         """
