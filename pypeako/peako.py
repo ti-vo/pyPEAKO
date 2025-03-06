@@ -1696,13 +1696,15 @@ class TrainingData(object):
         :param kwargs:
                num_spec: update TrainingData.num_spec
                span: span for smoothing. Required if plot_smoothed=True
+               yRange: tupel of min and max range index to choose random spectra from
         """
 
         if 'num_spec' in kwargs:
             self.num_spec[:] = kwargs['num_spec']
 
         closeby = kwargs['closeby'] if 'closeby' in kwargs else np.repeat(None, len(self.spec_data))
-
+        yRange = kwargs['yRange'] if 'yRange' in kwargs else np.repeat(None, len(self.spec_data))
+        
         for n in range(len(self.spec_data)):
             s = 0
             if closeby[n] is not None:
@@ -1710,6 +1712,9 @@ class TrainingData(object):
                 tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
                 rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
                 rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
+            elif yRange is not None:
+                tind = (1, self.tdim[n] - 1)
+                rind = yRange
             else:
                 tind = (1, self.tdim[n] - 1)
                 rind = (1, self.rdim[n] - 1)
