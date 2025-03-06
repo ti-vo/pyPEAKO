@@ -1028,7 +1028,9 @@ class Peako(object):
                             for s, f in zip(smoothed_spectra, filenames_smoothing):
                                 if not os.path.isfile(f):
                                     print(f"saving temporary file: {f}") if self.verbosity > 0 else None
-                                    s.to_netcdf(f)
+                                    comp = dict(zlib=True, complevel=5)
+                                    encoding = {var: comp for var in s.data_vars}
+                                    s.to_netcdf(f, encoding=encoding)
 
     def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
