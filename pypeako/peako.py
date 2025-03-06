@@ -183,7 +183,7 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
     return area
 
 
-def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
+def plot_timeheight_numpeaks(data, maxpeaks=15, key='peaks', **kwargs):
     """
 
     :param data: xarray.Dataset containing range, time and number of peaks
@@ -601,7 +601,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
     return out
 
 
-def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_peaks=5, fill_value=-999, **kwargs):
+def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_peaks=15, fill_value=-999, **kwargs):
     """
     detect peaks in (smoothed) spectra which fulfill minimum prominence and width criteria.
     :param spec_data
@@ -695,7 +695,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
 
 class Peako(object):
     def __init__(self, training_data=[], optimization_method='loop', multiprocessing_flag=False,
-                 temporary_files_flag=False, max_peaks=10, k=0, num_training_samples=None, save_similarities=True,
+                 temporary_files_flag=False, max_peaks=20, k=0, num_training_samples=None, save_similarities=True,
                  verbosity=0, **kwargs):
 
         """
@@ -721,7 +721,7 @@ class Peako(object):
         self.training_files = training_data
         self.training_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in training_data]
         self.specfiles = kwargs['specfiles'] if 'specfiles' in kwargs else ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
-        self.spec_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in self.specfiles]
+        self.spec_data = [xr.open_dataset(fin, mask_and_scale=True, engine='netcdf4') for fin in self.specfiles]
         self.spec_data = [s.load() for s in self.spec_data]
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
@@ -1028,7 +1028,9 @@ class Peako(object):
                             for s, f in zip(smoothed_spectra, filenames_smoothing):
                                 if not os.path.isfile(f):
                                     print(f"saving temporary file: {f}") if self.verbosity > 0 else None
-                                    s.to_netcdf(f)
+                                    comp = dict(zlib=True, complevel=5)
+                                    encoding = {var: comp for var in s.data_vars}
+                                    s.to_netcdf(f, encoding=encoding)
 
     def area_peaks_similarity(self, algorithm_peaks: np.array, mode='training', array_out=False):
         """ Compute similarity measure based on overlapping area of hand-marked peaks by a user and algorithm-detected
@@ -1694,13 +1696,15 @@ class TrainingData(object):
         :param kwargs:
                num_spec: update TrainingData.num_spec
                span: span for smoothing. Required if plot_smoothed=True
+               yRange: tupel of min and max range index to choose random spectra from
         """
 
         if 'num_spec' in kwargs:
             self.num_spec[:] = kwargs['num_spec']
 
         closeby = kwargs['closeby'] if 'closeby' in kwargs else np.repeat(None, len(self.spec_data))
-
+        yRange = kwargs['yRange'] if 'yRange' in kwargs else np.repeat(None, len(self.spec_data))
+        
         for n in range(len(self.spec_data)):
             s = 0
             if closeby[n] is not None:
@@ -1708,6 +1712,9 @@ class TrainingData(object):
                 tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
                 rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
                 rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
+            elif yRange is not None:
+                tind = (1, self.tdim[n] - 1)
+                rind = yRange
             else:
                 tind = (1, self.tdim[n] - 1)
                 rind = (1, self.rdim[n] - 1)
