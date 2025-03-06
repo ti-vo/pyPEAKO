@@ -494,7 +494,7 @@ def smooth_spectra(averaged_spectra, spec_data, span, polyorder, **kwargs):
                 min_vals = np.tile(np.nanmin(spec_chunk, axis=2)[:, :, np.newaxis], (1, 1, spec_chunk.shape[2]))
                 spec_chunk[nanmask] = min_vals[nanmask]
                 spec_chunk = scipy.signal.savgol_filter(utils.lin2z(spec_chunk),
-                                                        window_length, polyorder=polyorder, axis=2, mode='nearest')
+                                                        window_length, polyorder=int(polyorder), axis=2, mode='nearest')
                 spectra_out[f][:, r_ind[0]: r_ind[1], :] = utils.z2lin(spec_chunk)
                 # experimental: fill smoothed spectra "gaps" with raw spectrum values
                 # TODO maybe this causes the spurious peaks at the flanks of the spectra?
@@ -620,7 +620,7 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
         peaks_dataset = xr.Dataset()
         peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
             (spectra[f]['doppler_spectrum'].values.shape[0:2] +
-             (max_peaks,)), np.nan, dtype=np.int),
+             (max_peaks,)), np.nan, dtype=int),
             dims=['time', 'range', 'peaks'],
             coords=[spectra[f]['time'], spectra[f]['range'],
                     xr.DataArray(range(max_peaks))])})
@@ -1409,7 +1409,7 @@ class Peako(object):
 
                 ax.plot(velbins[peako_ind], utils.lin2z(spectrum)[peako_ind], marker='o',
                         color=['#0339cc', '#0099ff', '#9933ff'][c_ind], markeredgecolor='k',
-                        linestyle="None", label=f'PEAKO peaks {j} ({len(peako_ind)})', markersize=[8, 7, 6][c_ind])
+                        linestyle="None", label=f'PEAKO peaks ({len(peako_ind)})', markersize=[8, 7, 6][c_ind])
                 c_ind += 1
 
         ax.plot(velbins[user_ind], utils.lin2z(spectrum)[user_ind], marker=utils.cut_star, color='r',
@@ -1716,10 +1716,7 @@ class TrainingData(object):
                 random_index_r = random.randint(rind[0], rind[1])
                 if self.verbosity > 1:
                     print(f'r: {random_index_r}, t: {random_index_t}')
-                if 'jupyter' in kwargs and kwargs['jupyter']:
-                    vals, _ = self.input_peak_locations_jupyter(n, random_index_t, random_index_r, plot_smoothed)
-                else:
-                    vals, _ = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
+                vals, _ = self.input_peak_locations(n, random_index_t, random_index_r, plot_smoothed, **kwargs)
                 if not np.all(np.isnan(vals)):
                     self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
                     s += 1
@@ -1770,28 +1767,6 @@ class TrainingData(object):
 
         return self.input_peak_locations_jupyter(n, tind, rind, plot_smoothed)
 
-        for n in range(len(self.spec_data)):
-            s = 0
-            if closeby[n] is not None:
-                tind = utils.get_closest_time(closeby[n][0], self.spec_data[n].time)
-                tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
-                rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
-                rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
-            else:
-                tind = (1, self.tdim[n] - 1)
-                rind = (1, self.rdim[n] - 1)
-            #while s < self.num_spec[n]:
-            random_index_t = random.randint(tind[0], tind[1])
-            random_index_r = random.randint(rind[0], rind[1])
-            if self.verbosity > 1:
-                print(f'r: {random_index_r}, t: {random_index_t}')
-            
-
-            if not np.all(np.isnan(vals)):
-                self.training_data_out[n][random_index_t, random_index_r, 0:len(vals)] = vals
-                s += 1
-                self.plot_count[n] = s
-    
 
     def input_peak_locations(self, n_file, t_index, r_index, plot_smoothed, **kwargs):
         """
