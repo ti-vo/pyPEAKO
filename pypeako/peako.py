@@ -183,7 +183,7 @@ def compute_overlapping_area(i1, i2, edge_list_1, edge_list_2, spectrum, noise_f
     return area
 
 
-def plot_timeheight_numpeaks(data, maxpeaks=5, key='peaks', **kwargs):
+def plot_timeheight_numpeaks(data, maxpeaks=15, key='peaks', **kwargs):
     """
 
     :param data: xarray.Dataset containing range, time and number of peaks
@@ -601,7 +601,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
     return out
 
 
-def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_peaks=5, fill_value=-999, **kwargs):
+def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_peaks=15, fill_value=-999, **kwargs):
     """
     detect peaks in (smoothed) spectra which fulfill minimum prominence and width criteria.
     :param spec_data
@@ -695,7 +695,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
 
 class Peako(object):
     def __init__(self, training_data=[], optimization_method='loop', multiprocessing_flag=False,
-                 temporary_files_flag=False, max_peaks=10, k=0, num_training_samples=None, save_similarities=True,
+                 temporary_files_flag=False, max_peaks=20, k=0, num_training_samples=None, save_similarities=True,
                  verbosity=0, **kwargs):
 
         """
