@@ -195,7 +195,7 @@ def plot_timeheight_numpeaks(data, maxpeaks=15, key='peaks', **kwargs):
     figsize = kwargs['figsize'] if 'figsize' in kwargs else [10, 5.7]
     fig, ax = plt.subplots(1, figsize=figsize)
     dt_list = [datetime.datetime.utcfromtimestamp(time) for time in data.time.values]
-    var = np.sum(data[f'{key}'].values > -900, axis=2)
+    var = np.sum(data[f'{key}'].values > 0, axis=2)
     jumps = np.where(np.diff(data.time.values) > 60)[0]
     for ind in jumps[::-1].tolist():
         dt_list.insert(ind + 1, dt_list[ind] + datetime.timedelta(seconds=5))
@@ -205,11 +205,11 @@ def plot_timeheight_numpeaks(data, maxpeaks=15, key='peaks', **kwargs):
     cmap = plt.get_cmap(cmap, maxpeaks)
     cmap.set_under('white')
     cbarformatter = plt.FuncFormatter(lambda val, loc: labels[val])
-    labels = {0: '0', 1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
+    labels = {i: str(i) for i in range(maxpeaks + 1)}
     pcmesh = ax.pcolormesh(matplotlib.dates.date2num(dt_list[:]),
                            data['range'].values / 1000, np.transpose(var), cmap=cmap, vmin=0.5, vmax=maxpeaks + 0.5)
 
-    cbar = fig.colorbar(pcmesh, ticks=[1, 2, 3, 4, 5], format=cbarformatter)
+    cbar = fig.colorbar(pcmesh, ticks=np.arange(maxpeaks+1), format=cbarformatter)
     time_extend = dt_list[-1] - dt_list[0]
     ax = set_xticks_and_xlabels(ax, time_extend)
 
@@ -1583,6 +1583,7 @@ class Peako(object):
         Peako.testing_data
 
         :param mode: (string) Either 'training' or 'testing'
+        :kwargs maxpeaks: maximum number of peaks
         :return:
         """
 
@@ -1595,7 +1596,8 @@ class Peako(object):
             algorithm_peaks = self.peako_peaks_testing
             user_peaks = self.testing_data
         elif mode == 'manual':
-            assert 'peako_params' in kwargs, 'peako_params (list of five parameters) must be supplied'
+            assert 'peako_params' in kwargs, 'peako_params (list of six parameters: t_ave, r_ave, span, polyorder, ' \
+                                             'width, prominence) must be supplied'
             t, h, s, po, w, pr = kwargs['peako_params']
             algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
                                                                 width=w, prom=pr, polyorder=po,
@@ -1610,12 +1612,12 @@ class Peako(object):
                 if len(algorithm_peaks[j][k]) > 0:
                     for f in range(len(algorithm_peaks[j][k])):
                         fig, ax = plot_timeheight_numpeaks(algorithm_peaks[j][k][f], key='PeakoPeaks', **kwargs)
-                        ax.set_title(f'{mode}, optimization: {j}, k={k}, file number {f + 1}')
+                        ax.set_title(f'{mode}, k={k}, file number {f + 1}')
                         if len(self.plot_dir) > 0:
                             fig.savefig(self.plot_dir + f'{mode}_{j}_height_time_peako_{f}_k{k}.png')
         for f in range(len(user_peaks)):
             fig, ax = plot_timeheight_numpeaks(user_peaks[f], key='peaks')
-            ax.set_title(f'{mode}, user peaks, file number {f + 1}')
+            ax.set_title(f'user peaks, file number {f + 1}')
             if len(self.plot_dir) > 0:
                 fig.savefig(self.plot_dir + f'{mode}_{f + 1}_height_time_user.png')
         return algorithm_peaks
@@ -1712,7 +1714,7 @@ class TrainingData(object):
                 tind = (np.max([1, tind - 10]), np.min([self.tdim[n] - 1, tind + 10]))
                 rind = utils.argnearest(self.spec_data[n].range, closeby[n][1])
                 rind = (np.max([1, rind - 5]), np.min([self.rdim[n] - 1, rind + 5]))
-            elif yRange is not None:
+            elif yRange[n] is not None:
                 tind = (1, self.tdim[n] - 1)
                 rind = yRange
             else:
@@ -1729,7 +1731,7 @@ class TrainingData(object):
                     s += 1
                     self.plot_count[n] = s
 
-    def mark_random_spectra_jupyter(self, plot_smoothed=False, **kwargs):
+    def mark_random_spectra_jupyter(self, plot_smoothed=False, chirp=0, **kwargs):
         """
         Mark random spectra in TrainingData.spec_data (number of randomly drawn spectra in time-height space defined by
         TrainingData.num_spec) and save x and y locations
@@ -1761,10 +1763,8 @@ class TrainingData(object):
         # modify the function call slightly
         print('possible range indices',  rind)
         print(self.spec_data[n]['chirp_start_indices'].values)
-        print(kwargs['chirp']) if 'chirp' in kwargs else None
-        
-        kwargs['chirp'] = 1
-        if 'chirp' in kwargs:
+
+        if chirp is not None:
             n_rg = self.spec_data[n]['chirp_start_indices']
             range_chirp_mapping = np.repeat(
                 np.arange(len(n_rg)), np.diff(np.hstack((n_rg, len(self.spec_data[n].range)))))
@@ -1834,7 +1834,7 @@ class TrainingData(object):
                                                  f' time: {utils.format_hms(self.spec_data[n_file]["time"].values[int(timeindex)])}' + comment,
                                                  fontweight='semibold', fontsize=9, color='b')
                         ax[dim1, dim2].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
-                        ax[dim1, dim2].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
+                        ax[dim1, dim2].set_ylabel("Reflectivity [dBZ]", fontweight='semibold', fontsize=9)
                         ax[dim1, dim2].grid(True)
 
             ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw')
@@ -2003,8 +2003,8 @@ class TrainingData(object):
                     ax[dim1, dim2].plot(velbins, utils.lin2z(thisSpectrum.values))
                     ax[dim1, dim2].set_xlim(xlim)
                     ax[dim1, dim2].grid(True)
-                ax[dim1, dim2].set_xlabel("Doppler velocity [m/s]", fontweight='semibold', fontsize=9)
-                ax[dim1, dim2].set_ylabel("Reflectivity [dBZ m$^{-1}$s]", fontweight='semibold', fontsize=9)
+                ax[dim1, dim2].set_xlabel("Doppler velocity [m s$^{-1}$]", fontweight='semibold', fontsize=9)
+                ax[dim1, dim2].set_ylabel("Reflectivity [dBZ]", fontweight='semibold', fontsize=9)
 
         # Plot center panel
         ax[1, 1].plot(velbins, utils.lin2z(this_spectrum_center.values), label='raw', color='r')
