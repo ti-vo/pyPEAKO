@@ -1012,7 +1012,7 @@ class Peako(object):
                     print(f"saving temporary files: {filenames}") if self.verbosity > 0 else None
                 else:
                     print(f"files already exist, loading from disk: {filenames}") if self.verbosity > 0 else None
-                    avg_spec = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10}) for f in filenames]
+                    avg_spec = [xr.open_dataset(f, mask_and_scale=True) for f in filenames]
 
                 for span in self.training_params['span']:
                     for polyorder in self.training_params['polyorder']:
@@ -1140,7 +1140,7 @@ class Peako(object):
                             filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' + '.NCtemp'
                                                    for sp in self.specfiles]
                             print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
-                            smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
+                            smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
                                                 for f in filenames_smoothing]
                             self.peako_peaks_training[j][k] = get_peaks(smoothed_spectra, self.spec_data, pr, w,
                                                                         max_peaks=self.max_peaks,
@@ -1165,7 +1165,7 @@ class Peako(object):
                             filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
                                                    for sp in self.specfiles]
                             print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
-                            smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
+                            smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
                                                 for f in filenames_smoothing]
                             self.peako_peaks_training[j][k] = get_peaks(smoothed_spectra, self.spec_data, pr, w,
                                                                         max_peaks=self.max_peaks,
@@ -1584,6 +1584,8 @@ class Peako(object):
 
         :param mode: (string) Either 'training' or 'testing'
         :kwargs maxpeaks: maximum number of peaks
+        :kwargs noplot: do not return fig, ax
+        :kwargs mask_chirps: mask chirps with indices in this list, e.g. [0,1] would mask the first two chirps
         :return:
         """
 
@@ -1599,12 +1601,35 @@ class Peako(object):
             assert 'peako_params' in kwargs, 'peako_params (list of six parameters: t_ave, r_ave, span, polyorder, ' \
                                              'width, prominence) must be supplied'
             t, h, s, po, w, pr = kwargs['peako_params']
-            algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
+
+            if self.tempfiles:
+                filenames_smoothing = [
+                        '.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' + '.NCtemp'
+                        for sp in self.specfiles]
+                print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
+                smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
+                                        for f in filenames_smoothing]
+                algorithm_peaks = {'manual': [get_peaks(smoothed_spectra, self.spec_data, pr, w,
+                                                                max_peaks=self.max_peaks,
+                                                                fill_value=self.fill_value,
+                                                                verbosity=self.verbosity,
+                                                                all_spectra=True)]}
+            else:
+                algorithm_peaks = {'manual': [average_smooth_detect(self.spec_data, t_avg=int(t), h_avg=int(h), span=s,
                                                                 width=w, prom=pr, polyorder=po,
                                                                 fill_value=self.fill_value, max_peaks=self.max_peaks,
                                                                 all_spectra=True, verbosity=self.verbosity)]}
             self.create_training_mask()
             user_peaks = self.training_data
+        if 'mask_chirps' in kwargs:
+            for f in range(len(self.training_data)):
+                chirp_offsets = utils.get_chirp_offsets(self.spec_data[f])
+                c_ind = np.repeat(self.training_data[f].chirp.values, np.diff(chirp_offsets))
+                for i in kwargs['mask_chirps']:
+                    algorithm_peaks[mode][f][0].PeakoPeaks[:, c_ind == i, :] = np.nan
+
+        if 'noplot' in kwargs and kwargs['noplot']:
+            return algorithm_peaks
         # plot number of peako peaks for each of the training files and each of the optimization methods,
         # and number of user-found peaks
         for j in algorithm_peaks.keys():
