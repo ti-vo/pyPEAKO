@@ -15,6 +15,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from pypeako import utils
 from sklearn.model_selection import KFold
+from pathlib import Path
 
 
 def peak_width(spectrum, pks, left_edge, right_edge, rel_height=0.5):
@@ -1711,8 +1712,8 @@ class TrainingData(object):
             self.tdim.append(len(self.spec_data[f]['time']))
             self.rdim.append(len(self.spec_data[f]['range']))
             self.training_data_out.append(np.full((self.tdim[-1], self.rdim[-1], self.max_peaks), self.fill_value))
-            ncfile = '/'.join(self.specfiles_in[f].split('/')[0:-1]) + \
-                     '/' + 'marked_peaks_' + self.specfiles_in[f].split('/')[-1]
+            p = Path(self.specfiles_in[f])
+            ncfile = p.parent / f"marked_peaks_{p.name}"
             self.peaks_ncfiles.append(ncfile)
             self.plot_count.append(0)
 
