@@ -721,12 +721,12 @@ class Peako(object):
         """
         self.training_files = training_data
         self.training_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in training_data]
-        self.specfiles = kwargs['specfiles'] if 'specfiles' in kwargs else ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.training_files]
+        self.specfiles = kwargs['specfiles'] if 'specfiles' in kwargs else [Path(f).parent / f"{Path(f).name[13:]}" for f in self.training_files]
         self.spec_data = [xr.open_dataset(fin, mask_and_scale=True, engine='netcdf4') for fin in self.specfiles]
         self.spec_data = [s.load() for s in self.spec_data]
         self.spec_data = utils.mask_velocity_vectors(self.spec_data)
         self.spec_data = utils.mask_fill_values(self.spec_data)
-        list_out = [f + 'temp' for f in self.specfiles]
+        list_out = [f.with_suffix(f.suffix + 'temp') for f in self.specfiles]
         self.spec_data = utils.save_and_reload(self.spec_data, list_out)
         self.multiprocessing = multiprocessing_flag
         self.tempfiles = temporary_files_flag
@@ -1427,7 +1427,7 @@ class Peako(object):
                      f'{utils.format_hms(self.spec_data[f]["time"].values[int(t_ind[i])])}')
         if len(self.plot_dir) > 0:
             fig.savefig(self.plot_dir + f'spectrum_{round(self.spec_data[f]["range_layers"].values[h_ind[i]])}m'
-                                        f'_{utils.format_hms(self.spec_data[f]["time"].values[int(t_ind[i])])}_k{k}.png')
+                                        f'_{utils.format_hms_fname(self.spec_data[f]["time"].values[int(t_ind[i])])}_k{k}.png')
 
         return fig, ax
 
@@ -1555,7 +1555,7 @@ class Peako(object):
                              f'{utils.format_hms(self.spec_data[file]["time"].values[t_i])}')
             if len(self.plot_dir) > 0:
                 fig.savefig(self.plot_dir + f'algorithm_peaks_'
-                                            f'{utils.format_hms(self.spec_data[file]["time"].values[t_i])}_'
+                                            f'{utils.format_hms_fname(self.spec_data[file]["time"].values[t_i])}_'
                                             f'{round(self.spec_data[file]["range_layers"].values[h_i])}m_k{k}.png',
                             dpi=300)
         if return_title:
@@ -1572,7 +1572,7 @@ class Peako(object):
         """
         self.testing_files = test_data
         self.testing_data = [xr.open_dataset(fin, mask_and_scale=True) for fin in test_data]
-        self.specfiles_test = ['/'.join(f.split('/')[:-1]) + '/' + f.split('/')[-1][13:] for f in self.testing_files]
+        self.specfiles_test = [Path(f).parent / f"{Path(f).name[13:]}" for f in self.testing_files]
         self.spec_data_test = [xr.open_dataset(fin, mask_and_scale=True) for fin in self.specfiles_test]
         self.create_training_mask()
         self.testing_stats()
