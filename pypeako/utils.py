@@ -42,6 +42,11 @@ def format_hms(unixtime):
     """
     return datetime.datetime.utcfromtimestamp(unixtime).strftime("%H:%M:%S")
 
+def format_hms_fname(unixtime):
+    """format time stamp in seconds since 01.01.1970 00:00 UTC to HH:MM:SS
+    :param unixtime: time stamp (seconds since 01.01.1970 00:00 UTC)
+    """
+    return datetime.datetime.utcfromtimestamp(unixtime).strftime("%H-%M-%S")
 
 def round_to_odd(f):
     """round to odd number

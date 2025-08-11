@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyPEAKO"
+version = "0.0.3.post2"
+description = "peak detection in cloud radar Doppler spectra"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.6"
+license = { text = "MIT" }
+
+authors = [
+  { name = "Teresa Vogl", email = "teresa.vogl@uni-leipzig.de" }
+]
+
+dependencies = [
+  "numpy>=1.16",
+  "scipy>=1.2",
+  "netCDF4>=1.4.2",
+  "matplotlib>=3.0.2",
+  "xarray",
+  "requests",
+  "dask[complete]",
+  "scikit-learn",
+  "ipympl",
+]
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.6",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=3.7",
+  "check-manifest",
+  "twine"
+]
+
+[project.urls]
+Homepage = "https://github.com/ti-vo/pyPEAKO"
+
+[tool.setuptools.packages.find]
+where = ["."]
+# exclude = ["docs", "tests", "playground"]
+
+# [tool.setuptools.package-data]
+# # This assumes you want to include data files in pyPEAKO package
+# pyPEAKO = [
+#   "../examples/sample_spectra.nc",
+#   "../examples/marked_peaks_sample_spectra.nc"
+# ]
