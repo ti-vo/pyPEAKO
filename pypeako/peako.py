@@ -879,9 +879,7 @@ class Peako(object):
                 result = self.train_peako_inner(**kwargs)['training result'][0]
 
                 if self.tempfiles:
-                    filenames_smoothing = ['.'.join(s.split('.')[
-                                                    :-1]) + f'_t{result["t_avg"]}_h{result["h_avg"]}_s{result["span"]}_p{result["polyorder"]}' + '.NCtemp'
-                                           for s in self.specfiles]
+                    filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{result['t_avg']}_h{result['h_avg']}_s{result['span']}_p{result['polyorder']}.NCtemp" for f in self.specfiles]
                     smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                         for f in filenames_smoothing]
                     val_peaks = get_peaks(smoothed_spectra, self.spec_data, prom=result["prom"],
@@ -924,9 +922,7 @@ class Peako(object):
                 for k, span in enumerate(self.training_params['span']):
                     for l, polyorder in enumerate(self.training_params['polyorder']):
                         if self.tempfiles:
-                            filenames_smoothing = [
-                                '.'.join(s.split('.')[:-1]) + f'_t{t_avg}_h{h_avg}_s{span}_p{polyorder}' + '.NCtemp'
-                                for s in self.specfiles]
+                            filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{t_avg}_h{h_avg}_s{span}_p{polyorder}.NCtemp" for f in self.specfiles]
                         else:
                             smoothed_spectra = smooth_spectra(avg_spec, self.spec_data, span=span, polyorder=polyorder,
                                                               verbosity=self.verbosity)
@@ -1006,7 +1002,7 @@ class Peako(object):
     def write_temporary_files(self):
         for t_avg in self.training_params['t_avg']:
             for h_avg in self.training_params['h_avg']:
-                filenames = ['.'.join(s.split('.')[:-1]) + f'_t{t_avg}_h{h_avg}' + '.NCtemp' for s in self.specfiles]
+                filenames = [Path(f).parent / f"{Path(f).stem}_t{t_avg}_h{h_avg}.NCtemp" for f in self.specfiles]
                 if not all([os.path.isfile(f) for f in filenames]):
                     avg_spec = average_spectra(self.spec_data, t_avg=t_avg, h_avg=h_avg)
                     avg_spec = utils.save_and_reload(avg_spec, filenames)
@@ -1019,8 +1015,7 @@ class Peako(object):
                     for polyorder in self.training_params['polyorder']:
                         if self.verbosity > 0:
                             print(f"checking if files exist for span {span} and polyorder {polyorder}...")
-                        filenames_smoothing = ['.'.join(s.split('.')[:-1]) + f'_s{span}_p{polyorder}' + '.NCtemp'
-                                               for s in filenames]
+                        filenames = [Path(f).parent / f"{Path(f).stem}_s{span}_p{polyorder}.NCtemp" for f in filenames]
                         if not all([os.path.isfile(f) for f in filenames_smoothing]):
                             print(f"files do not exist: {[f for f in filenames_smoothing if ~os.path.isfile(f)]}") if \
                                 self.verbosity > 0 else None
@@ -1138,8 +1133,7 @@ class Peako(object):
                     if len(self.peako_peaks_training[j][k]) == 0:
                         print('finding peaks for all times and ranges...')
                         if self.tempfiles:
-                            filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' + '.NCtemp'
-                                                   for sp in self.specfiles]
+                            filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{int(t)}_h{int(h)}_s{s}_p{int(po)}.NCtemp" for f in self.specfiles]
                             print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
                             smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
                                                 for f in filenames_smoothing]
@@ -1163,8 +1157,7 @@ class Peako(object):
                         print('finding peaks for all times and ranges...')
 
                         if self.tempfiles:
-                            filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
-                                                   for sp in self.specfiles]
+                            filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{int(t)}_h{int(h)}_s{s}_p{int(po)}.NCtemp" for f in self.specfiles]
                             print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
                             smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
                                                 for f in filenames_smoothing]
@@ -1394,8 +1387,7 @@ class Peako(object):
                     i_max = np.argmax(self.training_result[j][k][:, -1])
                     t, h, s, po, w, pr = self.training_result[j][k][i_max, :-1]
                     if self.tempfiles:
-                        filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' +
-                                               '.NCtemp' for sp in self.specfiles]
+                        filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{int(t)}_h{int(h)}_s{s}_p{int(po)}.NCtemp" for f in self.specfiles]
                         print(f'trying to read in files: {filenames_smoothing}') if self.verbosity > 0 else None
                         smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                             for f in filenames_smoothing]
@@ -1464,8 +1456,7 @@ class Peako(object):
             m_p_i = [np.zeros(i.doppler_spectrum.shape[:2]) for i in self.spec_data]
             m_p_i[file][time_index, range_index] = 1
             if self.tempfiles:
-                filenames_smoothing = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}_s{s}_p{po}' + '.NCtemp'
-                                       for sp in self.specfiles]
+                filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{t}_h{h}_s{s}_p{po}.NCtemp" for f in self.specfiles]
                 try:
                     smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                     for f in filenames_smoothing]
@@ -1497,7 +1488,7 @@ class Peako(object):
                 if h == 0 and t == 0:
                     avg_spectra = self.spec_data
                 else:
-                    avg_filenames = ['.'.join(sp.split('.')[:-1]) + f'_t{t}_h{h}' + '.NCtemp' for sp in self.specfiles]
+                    avg_filenames = [Path(f).parent / f"{Path(f).stem}_t{t}_h{h}.NCtemp" for f in self.specfiles]
                     print(f'loading averaged spectra files... {avg_filenames}')
                     avg_spectra = [xr.open_dataset(f, mask_and_scale=True, chunks={"time": 10})
                                    for f in avg_filenames]
@@ -1604,11 +1595,9 @@ class Peako(object):
             t, h, s, po, w, pr = kwargs['peako_params']
 
             if self.tempfiles:
-                filenames_smoothing = [
-                        '.'.join(sp.split('.')[:-1]) + f'_t{int(t)}_h{int(h)}_s{s}_p{int(po)}' + '.NCtemp'
-                        for sp in self.specfiles]
+                filenames_smoothing = [Path(f).parent / f"{Path(f).stem}_t{int(t)}_h{int(h)}_s{s}_p{int(po)}.NCtemp" for f in self.specfiles]
                 print(f"loading files from disk: {filenames_smoothing}") if self.verbosity > 0 else None
-                smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True)
+                smoothed_spectra = [xr.open_dataset(f, mask_and_scale=True, engine='netcdf4')
                                         for f in filenames_smoothing]
                 algorithm_peaks = {'manual': [get_peaks(smoothed_spectra, self.spec_data, pr, w,
                                                                 max_peaks=self.max_peaks,
