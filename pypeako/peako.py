@@ -597,7 +597,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
     locs = locs[spectrum[locs] > fill_value]
     locs = locs[0: max_peaks] if len(locs) > max_peaks else locs
     #  artificially create output dimension of same length as Doppler bins to avoid xarray value error
-    out = np.full(spectrum.shape[0], np.nan, dtype=int)
+    out = np.full(spectrum.shape[0], 0, dtype=int)
     out[range(len(locs))] = locs
     return out
 
@@ -621,7 +621,7 @@ def get_peaks(spectra, spec_data, prom, width_thresh, all_spectra=False, max_pea
         peaks_dataset = xr.Dataset()
         peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
             (spectra[f]['doppler_spectrum'].values.shape[0:2] +
-             (max_peaks,)), np.nan, dtype=int),
+             (max_peaks,)), 0, dtype=int),
             dims=['time', 'range', 'peaks'],
             coords=[spectra[f]['time'], spectra[f]['range'],
                     xr.DataArray(range(max_peaks))])})
@@ -689,7 +689,7 @@ def detect_single_spectrum(spectrum, fill_value, prom, width_thresh, max_peaks):
     locs = locs[spectrum[locs] > fill_value]
     locs = locs[0: max_peaks] if len(locs) > max_peaks else locs
     #  artificially create output dimension of same length as Doppler bins to avoid xarray value error
-    out = np.full(spectrum.shape[0], np.nan, dtype=int)
+    out = np.full(spectrum.shape[0], 0, dtype=int)
     out[range(len(locs))] = locs
     return out
 
@@ -1294,7 +1294,7 @@ class Peako(object):
                 peaks_dataset = xr.Dataset()
                 peaks_array = xr.Dataset(data_vars={'PeakoPeaks': xr.DataArray(np.full(
                     t_data[f]['peaks'].values.shape,
-                    np.nan, dtype=int), dims=['time', 'range', 'peaks'])})
+                    0, dtype=int), dims=['time', 'range', 'peaks'])})
                 for c in range(len(t_data[f].chirp)):
                     velbins = s_data[f]['velocity_vectors'].values[c, :]
                     r_ind = utils.get_chirp_offsets(s_data[f])[c:c + 2]
