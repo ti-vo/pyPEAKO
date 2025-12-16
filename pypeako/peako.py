@@ -860,6 +860,41 @@ class Peako(object):
                 self.validation_index = validation_index
                 self.marked_peaks_index = marked_peaks_index
 
+    @staticmethod
+    def apply_peako(spec_data, t_avg=None, h_avg=None, span=None,
+                    width=None, prom=None, polyorder=None, params=None):
+        """
+        Applies a PEAKO to a list of datasets using the given parameters.
+
+        :param spec_data: list of xarray data sets containing spectra
+        :param t_avg: time averaging in seconds
+        :param h_avg: height averaging in meters
+        :param span: smoothing span in m/s
+        :param width: minimum peak width in m/s
+        :param prom: minimum peak prominence in dBZ
+        :param polyorder: polynomial order for Savitzky-Golay smoothing
+        :param params: dictionary containing parameters to be used if not set explicitly
+        :return: function average_smooth_detect with the given parameters
+        """
+        params = params or {}
+        assert t_avg is not None or params.get('t_avg') is not None, "t_avg must be set"
+        assert h_avg is not None or params.get('h_avg') is not None, "h_avg must be set"
+        assert span is not None or params.get('span') is not None, "span must be set"
+        assert width is not None or params.get('width') is not None, "width must be set"
+        assert prom is not None or params.get('prom') is not None, "prom must be set"
+        assert polyorder is not None or params.get('polyorder') is not None, "polyorder must be set"
+
+        t_avg = t_avg if t_avg is not None else params.get('t_avg')
+        h_avg = h_avg if h_avg is not None else params.get('h_avg')
+        span = span if span is not None else params.get('span')
+        width = width if width is not None else params.get('width')
+        prom = prom if prom is not None else params.get('prom')
+        polyorder = polyorder if polyorder is not None else params.get('polyorder')
+
+        return average_smooth_detect(
+            spec_data, t_avg, h_avg, span, width, prom, polyorder, all_spectra=True
+        )
+
     def train_peako(self, **kwargs):
         """
             training peako: If k is set to a value > 0 loop over k folds
